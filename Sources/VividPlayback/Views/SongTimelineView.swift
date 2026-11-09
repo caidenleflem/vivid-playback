@@ -86,7 +86,8 @@ struct SongTimelineView: View {
                         Chip("Timecode generated from the sheet") { StatusDot(color: Brand.gold) }
                     case .file(let name):
                         if transport.trackFound, let first = transport.firstFileTimecode {
-                            Chip("Timecode from \(name) · starts \(first)") { StatusDot(color: Brand.ok) }
+                            Chip("From \(name) · \(first)") { StatusDot(color: Brand.ok) }
+                                .help("Timecode comes from this file. Its first frame reads \(first).")
                         } else if !transport.isLoading {
                             Chip("No timecode found in \(name)") { StatusDot(color: Color(hex: 0xE5675A)) }
                         }
@@ -114,23 +115,23 @@ struct SongTimelineView: View {
         }
     }
 
+    /// "Master  03 Night Drive.wav": click the name to choose or replace the file; right-click to remove it.
     private func fileMenu(_ label: String, _ path: String?, role: AudioRole, song: Song) -> some View {
-        Menu {
-            Button(path == nil ? "Choose \(label) File…" : "Replace \(label) File…") { model.choose(role, for: song) }
-            if path != nil { Button("Remove \(label) File") { model.removeFile(role, from: song) } }
-        } label: {
-            HStack(spacing: 6) {
-                Text(label).fontWeight(.semibold).foregroundStyle(Brand.steel)
+        HStack(spacing: 6) {
+            Text(label).fontWeight(.semibold).foregroundStyle(Brand.steel)
+            Button { model.choose(role, for: song) } label: {
                 Text(path.map { ($0 as NSString).lastPathComponent } ?? "Choose a file…")
                     .foregroundStyle(path == nil ? Brand.gold : Brand.space)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Brand.graphite)
+                    .underline(path == nil, color: Brand.gold.opacity(0.5))
             }
+            .buttonStyle(.plain)
+            .disabled(model.locked)
+            .contextMenu {
+                Button(path == nil ? "Choose \(label) File…" : "Replace \(label) File…") { model.choose(role, for: song) }
+                if path != nil { Button("Remove \(label) File") { model.removeFile(role, from: song) } }
+            }
+            .help("Click to choose or replace this song's \(label.lowercased()) file. Right-click to remove it. You can also drop a file on the song in the library.")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .disabled(model.locked)
-        .help("Choose or replace this song's \(label.lowercased()) file. You can also drop a file on the song in the library.")
     }
 }
 
