@@ -9,7 +9,7 @@ VERSION="${VERSION:-0.1.0}"
 BUILD="$(date +%Y%m%d%H%M)"
 APP="build/Vivid Playback.app"
 
-echo "Building Vivid Playback $VERSION…"
+echo "Building Vivid Playback ${VERSION}..."
 # Universal (Apple silicon and Intel) when the full Xcode toolchain is there; this Mac's chip otherwise.
 if swift build -c release --product VividPlayback --arch arm64 --arch x86_64 >/dev/null 2>&1; then
   BIN="$(swift build -c release --product VividPlayback --arch arm64 --arch x86_64 --show-bin-path)"
