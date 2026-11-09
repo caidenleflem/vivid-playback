@@ -138,7 +138,44 @@ final class AppModel: ObservableObject {
 
     init() {
         transport.onSongEnd = { [weak self] in self?.advanceAfterSongEnd() }
+        // `--demo library|timeline|clock` opens the example show on that screen, rolling.
+        // Used by the build to screenshot each screen.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "--demo") {
+            if i + 1 < args.count { runDemo(args[i + 1]) }
+            return
+        }
         reopenLastShow()
+    }
+
+    private func runDemo(_ name: String) {
+        let target: Screen
+        switch name {
+        case "library": target = .library
+        case "timeline": target = .timeline
+        case "clock": target = .clock
+        default: return
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
+        let reader = self.reader
+        Task {
+            guard let report = try? await Task.detached(operation: { () -> ImportReport in
+                try ExampleShow.write(to: folder)
+                return try ShowImporter(reader: reader).importFolder(folder, name: "Example Tour 2027")
+            }).value else { return }
+            load(report.show, package: folder.appendingPathComponent("Example.vividshow"), issues: report.issues)
+            if let third = queue.dropFirst(2).first ?? queue.first { cue(third) }
+            transport.locate(9.4)
+            if target == .timeline, var show = self.show, let song = currentSong,
+               let index = show.songs.firstIndex(where: { $0.id == song.id }) {
+                show.songs[index].markers = [(0.4, "Hit 1"), (5, "Verse 1"), (11, "Chorus · big look"), (17, "Bridge · blackout")].map {
+                    Marker(time: song.start.adding(frames: Int($0.0 * song.rate.framesPerSecond)), label: $0.1)
+                }
+                self.show = show
+            }
+            screen = target
+            transport.play()
+        }
     }
 
     // MARK: Songs

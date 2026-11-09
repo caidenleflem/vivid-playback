@@ -40,17 +40,34 @@ jobs:
           codesign --verify --deep --verbose=2 "$APP"
           ls "$APP/Contents/Resources/Fonts" "$APP/Contents/Resources/Images"
 
-      - name: Launch it and take a screenshot
+      - name: Launch it on each screen and take screenshots
         run: |
-          "build/Vivid Playback.app/Contents/MacOS/Vivid Playback" > build/launch.log 2>&1 &
-          PID=$!
-          sleep 12
-          screencapture -x build/screenshot.png || true
-          if ! kill -0 "$PID" 2>/dev/null; then
-            echo "The app quit on launch:"; cat build/launch.log; exit 1
-          fi
-          echo "Still running after 12 seconds."
-          kill "$PID"
+          mkdir -p build/screens
+          BIN="build/Vivid Playback.app/Contents/MacOS/Vivid Playback"
+          for screen in first-run library timeline clock; do
+            if [ "$screen" = "first-run" ]; then "$BIN" > "build/screens/$screen.log" 2>&1 &
+            else "$BIN" --demo "$screen" > "build/screens/$screen.log" 2>&1 & fi
+            PID=$!
+            sleep 14
+            screencapture -x "build/screens/$screen.png" || true
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "The app quit on the $screen screen:"; cat "build/screens/$screen.log"; exit 1
+            fi
+            kill "$PID"; sleep 2
+          done
+          echo "The app stayed up on every screen."
+
+      - name: Keep the screenshots on the ci-screens branch
+        run: |
+          cp -R build/screens "$RUNNER_TEMP/screens"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan ci-screens
+          git rm -rfq .
+          cp "$RUNNER_TEMP"/screens/*.png .
+          git add *.png
+          git commit -qm "Screens for ${GITHUB_SHA::7}"
+          git push -qf origin ci-screens
 
       - uses: actions/upload-artifact@v4
         with:
@@ -59,10 +76,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Launch-screenshot
-          path: |
-            build/screenshot.png
-            build/launch.log
+          name: Screens
+          path: build/screens
 
       - name: Publish the Latest build release
         env:
