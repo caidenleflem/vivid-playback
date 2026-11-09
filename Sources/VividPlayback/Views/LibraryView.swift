@@ -85,6 +85,7 @@ struct Sidebar: View {
             section("Library") {
                 navRow("Albums", selected: model.screen == .albums) { model.go(.albums) }
                 navRow("Now playing", selected: model.screen == .library) { model.go(.library) }
+                navRow("Connections", selected: model.screen == .connections) { model.go(.connections) }
             }
 
             section("Setlists") {
@@ -167,6 +168,8 @@ struct Sidebar: View {
 struct OutputsBox: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
+    @EnvironmentObject private var meters: MeterModel
+    @EnvironmentObject private var control: ControlCenter
 
     var body: some View {
         let routing = model.show?.routing ?? OutputRouting()
@@ -179,10 +182,25 @@ struct OutputsBox: View {
                     StatusDot(color: live ? Brand.ok : Brand.graphite)
                     Text("Master · \(channels(routing.masterChannels))")
                 }
+                if live, let m = routing.masterChannels.first, m >= 1, m <= 64 {
+                    LevelMeter(level: meters.levels[m - 1], hold: meters.holds[m - 1], height: 4)
+                }
                 HStack(spacing: 8) {
                     StatusDot(color: live && transport.timecodeRouted ? (transport.isPlaying ? Brand.ok : Brand.gold) : Brand.warn,
                               pulsing: live && transport.timecodeRouted && transport.isPlaying)
                     Text(routing.timecodeChannel.map { "Timecode · Out \($0)" } ?? "Timecode · not set")
+                }
+                if live, let t = routing.timecodeChannel, t >= 1, t <= 64 {
+                    LevelMeter(level: meters.levels[t - 1], hold: meters.holds[t - 1], height: 4)
+                }
+                let extras = [control.settings.mtcOut ? "MTC" : nil, control.settings.artNetOut ? "Art-Net" : nil].compactMap { $0 }
+                if !extras.isEmpty || control.isFollowing {
+                    HStack(spacing: 6) {
+                        if !extras.isEmpty { Text("+ " + extras.joined(separator: " · ")) }
+                        if control.isFollowing { Text("· Following \(control.settings.follow.label)").foregroundStyle(Brand.gold) }
+                    }
+                    .font(.manrope(11, .semibold))
+                    .foregroundStyle(Brand.space)
                 }
             }
             .font(.manrope(12))

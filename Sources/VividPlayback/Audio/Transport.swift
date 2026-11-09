@@ -29,6 +29,9 @@ final class Transport: ObservableObject {
     @Published private(set) var loop: ClosedRange<Double>?
 
     let audio = AudioOutput()
+    lazy var clock = OutputClock(state: audio.state)
+    /// Test timecode is going out (line check).
+    @Published private(set) var testing = false
     private(set) var song: Song?
     private var show: Show?
     private var buffers: PlaybackBuffers?
@@ -104,12 +107,13 @@ final class Transport: ObservableObject {
 
     // MARK: Songs
 
-    func load(_ song: Song, in show: Show, play: Bool? = nil) {
+    func load(_ song: Song, in show: Show, play: Bool? = nil, at position: Double? = nil) {
         let resume = play ?? isPlaying
         pause()
+        if testing { stopTest() }
         loop = nil
         audio.state.loop = nil
-        reload(song, in: show, at: -song.fileOffset, play: resume)
+        reload(song, in: show, at: position ?? -song.fileOffset, play: resume)
     }
 
     /// Keeps the song data current (markers, lengths) without touching playback.
@@ -225,8 +229,37 @@ final class Transport: ObservableObject {
         return seconds
     }
 
+    /// Hands the current state to the clock the MTC and Art-Net senders read.
+    func syncClock() {
+        clock.update(song: song, buffers: buffers, sampleRate: audio.sampleRate, latency: audio.latency, usesAudio: usesAudio,
+                     clockRunning: isPlaying && !usesAudio, anchorPosition: anchorPosition, anchorTime: anchorTime)
+    }
+
+    /// Sends test timecode on the timecode output (never the music) until stopped. Starts at
+    /// the current song's start, or 01:00:00:00.
+    func startTest() {
+        guard audio.isRunning, !isPlaying else { return }
+        let start = song.flatMap { $0.hasTimecode ? $0.start : nil } ?? Timecode("01:00:00:00", rate: .fps30)!
+        let rate = audio.sampleRate
+        let seconds = 300.0
+        let ltc = LTC.render(start: start, frameCount: Int(seconds * start.rate.framesPerSecond), sampleRate: rate)
+        audio.state.testPosition = 0
+        audio.state.test = PlaybackBuffers(sampleRate: rate, master: [[Float](repeating: 0, count: ltc.count)], timecode: ltc)
+        clock.setTest(start)
+        testing = true
+    }
+
+    func stopTest() {
+        let old = audio.state.test
+        audio.state.test = nil
+        clock.setTest(nil)
+        testing = false
+        if let old { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { _ = old } }
+    }
+
     func play() {
         guard !isPlaying, song != nil else { return }
+        if testing { stopTest() }
         if case .lost = status, !audio.isRunning { return }  // show-safe: no silent clock after a lost interface
         if usesAudio {
             audio.state.playing = true
@@ -238,6 +271,7 @@ final class Transport: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkEnd() }
         }
+        syncClock()
     }
 
     func pause() {
@@ -250,6 +284,7 @@ final class Transport: ObservableObject {
         isPlaying = false
         timer?.invalidate()
         timer = nil
+        syncClock()
     }
 
     func toggle() { isPlaying ? pause() : play() }
@@ -265,6 +300,7 @@ final class Transport: ObservableObject {
         anchorPosition = clamped
         anchorTime = CACurrentMediaTime()
         objectWillChange.send()
+        syncClock()
     }
 
     /// Loops between two points of the song (seconds from its start); nil stops looping.

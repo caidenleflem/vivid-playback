@@ -110,6 +110,25 @@ struct OutputSheet: View {
                         .frame(width: 260)
                     Text("\(Int(routing.masterGainDB)) dB").font(.manrope(13).monospacedDigit()).foregroundStyle(Brand.ink).frame(width: 50, alignment: .trailing)
                 }
+                VStack(alignment: .leading, spacing: 8) {
+                    ChannelMeter(label: "Master", channel: routing.masterChannels.first.map { $0 - 1 })
+                    if routing.masterChannels.count > 1 { ChannelMeter(label: "", channel: routing.masterChannels[1] - 1) }
+                    ChannelMeter(label: "Timecode", channel: routing.timecodeChannel.map { $0 - 1 })
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Brand.solid))
+                HStack {
+                    Button {
+                        transport.testing ? transport.stopTest() : transport.startTest()
+                    } label: {
+                        Label(transport.testing ? "Stop test timecode" : "Send test timecode",
+                              systemImage: transport.testing ? "stop.fill" : "dot.radiowaves.right")
+                    }
+                    .buttonStyle(QuietButtonStyle(prominent: transport.testing))
+                    .disabled(routing.timecodeChannel == nil || transport.isPlaying || !transport.audio.isRunning)
+                    Text("Timecode only, never the music. Also goes out as MTC and Art-Net if they're on.")
+                        .font(.manrope(11.5)).foregroundStyle(Brand.space)
+                }
                 switch transport.status {
                 case .playing(let name):
                     note("Running on \(name) at \(Int(transport.audio.sampleRate)) Hz.", warn: false)

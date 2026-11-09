@@ -17,6 +17,8 @@ struct VividPlaybackApp: App {
             RootView()
                 .environmentObject(model)
                 .environmentObject(model.transport)
+                .environmentObject(model.control)
+                .environmentObject(model.meters)
                 .frame(minWidth: 960, minHeight: 640)
                 .preferredColorScheme(.dark)
                 .onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }
@@ -112,6 +114,10 @@ struct PlaybackCommands: Commands {
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Button("Albums") { model.go(.albums) }
                 .keyboardShortcut("1", modifiers: [.command])
+            Button("Now Playing") { model.go(.library) }
+                .keyboardShortcut("2", modifiers: [.command])
+            Button("Connections") { model.go(.connections) }
+                .keyboardShortcut("3", modifiers: [.command])
             Button("Library") { model.go(.library) }
                 .keyboardShortcut(.escape, modifiers: [])
                 .disabled(typing)
@@ -145,6 +151,8 @@ struct RootView: View {
                 ClockScreen(morph: morph).transition(.opacity)
             case .albums:
                 AlbumsView().transition(.opacity)
+            case .connections:
+                ConnectionsView().transition(.opacity)
             }
             if let notice = model.notice, model.screen != .firstRun {
                 VStack {
@@ -179,7 +187,9 @@ struct RootView: View {
         .ignoresSafeArea()
         .animation(.vivid(0.4), value: transport.status)
         .sheet(isPresented: $model.issuesShown) { IssuesSheet().environmentObject(model) }
-        .sheet(isPresented: $model.outputShown) { OutputSheet().environmentObject(model).environmentObject(transport) }
+        .sheet(isPresented: $model.outputShown) {
+            OutputSheet().environmentObject(model).environmentObject(transport).environmentObject(model.meters)
+        }
         .sheet(isPresented: $model.setlistEditorShown) { SetlistEditor().environmentObject(model) }
         .sheet(isPresented: $model.goToShown) { GoToSheet().environmentObject(model) }
         .sheet(isPresented: $model.showInfoShown) { ShowInfoSheet().environmentObject(model) }

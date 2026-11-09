@@ -1,0 +1,72 @@
+import Foundation
+import QuartzCore
+import PlaybackCore
+
+/// The timecode going out, readable from any thread (the MTC and Art-Net senders run on their
+/// own queue). The transport keeps it current; the audio thread's position is read live.
+final class OutputClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let state: RenderState
+    private var song: Song?
+    private var buffers: PlaybackBuffers?
+    private var sampleRate: Double = 48_000
+    private var latency: Double = 0
+    private var usesAudio = false
+    private var clockRunning = false
+    private var anchorPosition: Double = 0
+    private var anchorTime: Double = 0
+    private var testStart: Timecode?
+
+    init(state: RenderState) { self.state = state }
+
+    func update(song: Song?, buffers: PlaybackBuffers?, sampleRate: Double, latency: Double, usesAudio: Bool,
+                clockRunning: Bool, anchorPosition: Double, anchorTime: Double) {
+        lock.lock(); defer { lock.unlock() }
+        self.song = song
+        self.buffers = buffers
+        self.sampleRate = sampleRate
+        self.latency = latency
+        self.usesAudio = usesAudio
+        self.clockRunning = clockRunning
+        self.anchorPosition = anchorPosition
+        self.anchorTime = anchorTime
+    }
+
+    func setTest(_ start: Timecode?) {
+        lock.lock(); testStart = start; lock.unlock()
+    }
+
+    /// The timecode at this moment, and whether it's running. Nil where nothing is sent.
+    func now(at time: Double = CACurrentMediaTime()) -> (timecode: Timecode?, running: Bool) {
+        lock.lock()
+        let song = self.song, buffers = self.buffers, rate = sampleRate, latency = self.latency
+        let usesAudio = self.usesAudio, clockRunning = self.clockRunning, anchor = anchorPosition, anchorTime = self.anchorTime
+        let testStart = self.testStart
+        lock.unlock()
+
+        if let testStart, !state.playing, state.test != nil {
+            let frames = Int(Double(state.testPosition) / rate * testStart.rate.framesPerSecond)
+            return (testStart.adding(frames: frames), true)
+        }
+        guard let song, song.hasTimecode else { return (nil, false) }
+        if usesAudio, let buffers {
+            var frames = Double(state.pendingLocate >= 0 ? state.pendingLocate : state.renderedPosition)
+            let running = state.playing
+            if running {
+                frames += min(0.1, max(0, time - state.renderedAt)) * rate
+                frames -= latency * rate
+            }
+            switch buffers.source {
+            case .file:
+                return (buffers.ltc?.timecode(atSample: Int(frames)), running)
+            case .unreadable, .none:
+                return (nil, false)
+            case .generated:
+                let position = frames / rate - song.fileOffset
+                return (song.start.adding(frames: Int((position * song.rate.framesPerSecond + 1e-6).rounded(.down))), running)
+            }
+        }
+        let position = clockRunning ? anchor + (time - anchorTime) : anchor
+        return (song.start.adding(frames: Int((position * song.rate.framesPerSecond + 1e-6).rounded(.down))), clockRunning)
+    }
+}

@@ -208,3 +208,23 @@ playing), re-check, and can be undone (Playback › Undo Fix, ⌥⌘Z, or Undo i
 - Hiding songs: Sort menu › **Hide Skipped Songs** leaves skipped songs out of the list (kept
   per Mac). Right-click › **Remove from Setlist** takes a song out of that setlist only (not while
   it's playing); Edit Setlist lists "Not in this setlist" songs with **Add**. 71 tests pass.
+
+## 2026-11-09: Connections (MTC and Art-Net out, remote control, following), meters, test timecode
+
+- **Connections** page (⌘3, sidebar): three timecode-out tiles (LTC, MIDI timecode, Art-Net),
+  each live with the timecode it's sending; Follow timecode (Off / LTC in / MTC / Art-Net) with a
+  big incoming readout and status; Remote control (OSC with this Mac's addresses and the command
+  list; MIDI with MIDI Machine Control and MIDI Learn for Go, Stop, Go/Stop, Next, Previous, Top
+  of song, Add marker). Settings are per Mac (UserDefaults), not per show.
+- MTC and Art-Net follow `OutputClock`, the same timecode as the LTC (read from the song's file),
+  on a high-priority queue: quarter frames while running, full frames on stop and jumps;
+  Art-Net once per frame. MTC also goes out a virtual "Vivid Playback" MIDI port.
+- Following: `ChaseEngine` (core, tested) cues the song whose range holds the incoming timecode,
+  follows a parked/scrubbing source, plays once it counts up, relocates past 2 frames of drift,
+  stops 0.4 s after timecode stops. LTC in uses a streaming decoder (core, tested) on an input
+  channel of any interface.
+- Meters with peak hold (audio thread peaks, 30 Hz) in Audio Output, the LTC tile and the
+  sidebar. **Send test timecode**: timecode only, never the music, looping, while stopped; it
+  goes out as MTC/Art-Net too.
+- Info.plist: Local Network and Microphone usage text (Art-Net/OSC, LTC input).
+- 84 tests pass. Not yet run on hardware: MIDI ports, Art-Net to a console, LTC input.

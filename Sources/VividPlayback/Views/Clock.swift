@@ -76,6 +76,7 @@ struct SongProgress<Content: View>: View {
 struct StateChips: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
+    @EnvironmentObject private var control: ControlCenter
 
     var body: some View {
         HStack(spacing: 8) {
@@ -87,6 +88,13 @@ struct StateChips: View {
                 Chip("No timecode for this song · song time") { StatusDot(color: Brand.graphite) }
             } else {
                 outputChip
+            }
+            if control.isFollowing {
+                Chip("Following \(control.settings.follow.label)") {
+                    StatusDot(color: control.followStatus.hasPrefix("Following") ? Brand.ok : Brand.warn,
+                              pulsing: control.followStatus.hasPrefix("Following"))
+                }
+                .help(control.followStatus)
             }
             if let problem = transport.masterProblem {
                 Chip("Master can't be read") { StatusDot(color: Color(hex: 0xE5675A)) }.help(problem)

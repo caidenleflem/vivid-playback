@@ -252,3 +252,72 @@ public enum RemoteCommand: Equatable, Sendable {
         }
     }
 }
+
+// MARK: MIDI byte streams
+
+public enum MIDIBytes {
+    /// Splits a packet's bytes into whole messages (SysEx included). Running status isn't used
+    /// by anything this app listens to and is dropped.
+    public static func split(_ data: [UInt8]) -> [[UInt8]] {
+        var out: [[UInt8]] = []
+        var i = 0
+        while i < data.count {
+            let status = data[i]
+            guard status & 0x80 != 0 else { i += 1; continue }
+            var length: Int
+            switch status {
+            case 0xF0:
+                let end = data[i...].firstIndex(of: 0xF7) ?? (data.count - 1)
+                length = end - i + 1
+            case 0xF1, 0xF3: length = 2
+            case 0xF2: length = 3
+            case 0xF4...0xFF: length = 1
+            default:
+                switch status & 0xF0 {
+                case 0xC0, 0xD0: length = 2
+                default: length = 3
+                }
+            }
+            length = min(length, data.count - i)
+            out.append(Array(data[i..<i + length]))
+            i += length
+        }
+        return out
+    }
+}
+
+/// A button or pad learned for a remote action: a note-on or a control change (value > 0).
+public struct MIDITrigger: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Sendable { case note, controlChange }
+    public var kind: Kind
+    public var channel: Int
+    public var number: Int
+
+    public init(kind: Kind, channel: Int, number: Int) {
+        self.kind = kind
+        self.channel = channel
+        self.number = number
+    }
+
+    /// The trigger a message is, if it's a press (note-on with velocity, CC above 0).
+    public init?(message m: [UInt8]) {
+        guard m.count >= 3 else { return nil }
+        switch m[0] & 0xF0 {
+        case 0x90 where m[2] > 0: kind = .note
+        case 0xB0 where m[2] > 0: kind = .controlChange
+        default: return nil
+        }
+        channel = Int(m[0] & 0x0F) + 1
+        number = Int(m[1])
+    }
+
+    public var displayName: String {
+        switch kind {
+        case .note:
+            let names = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"]
+            return "Note \(names[number % 12])\(number / 12 - 1) · ch \(channel)"
+        case .controlChange:
+            return "CC \(number) · ch \(channel)"
+        }
+    }
+}

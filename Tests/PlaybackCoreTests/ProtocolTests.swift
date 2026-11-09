@@ -153,3 +153,15 @@ final class ChaseTests: XCTestCase {
         XCTAssertEqual(peaks[1], 0)
     }
 }
+
+final class MIDIBytesTests: XCTestCase {
+    func testSplitAndTriggers() {
+        let bytes: [UInt8] = [0xF1, 0x23, 0x90, 60, 100, 0xF0, 0x7F, 0x7F, 0x06, 0x02, 0xF7, 0xF8, 0xB1, 7, 0]
+        let msgs = MIDIBytes.split(bytes)
+        XCTAssertEqual(msgs, [[0xF1, 0x23], [0x90, 60, 100], [0xF0, 0x7F, 0x7F, 0x06, 0x02, 0xF7], [0xF8], [0xB1, 7, 0]])
+        XCTAssertEqual(MIDITrigger(message: msgs[1]), MIDITrigger(kind: .note, channel: 1, number: 60))
+        XCTAssertNil(MIDITrigger(message: msgs[4]), "CC at 0 is a release")
+        XCTAssertNil(MIDITrigger(message: [0x90, 60, 0]), "note-on at 0 is a note-off")
+        XCTAssertEqual(MIDITrigger(kind: .note, channel: 1, number: 60).displayName, "Note C4 · ch 1")
+    }
+}

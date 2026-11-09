@@ -76,7 +76,7 @@ enum ImportState {
 }
 
 enum Screen: Equatable {
-    case firstRun, library, timeline, clock, albums
+    case firstRun, library, timeline, clock, albums, connections
 }
 
 /// The song as it was before the last fix, so it can be put back.
@@ -130,10 +130,19 @@ final class AppModel: ObservableObject {
     @Published var noticeOffersUndo = false
 
     let transport = Transport()
+    lazy var control = ControlCenter(clock: transport.clock)
+    lazy var meters = MeterModel(state: transport.audio.state)
     private let reader = AVAudioFileReader()
 
     init() {
         transport.onSongEnd = { [weak self] in self?.advanceAfterSongEnd() }
+        control.onCommand = { [weak self] in self?.handle($0) }
+        control.onFollow = { [weak self] in self?.follow($0) }
+        control.followContext = { [weak self] in
+            guard let self else { return ([], nil, 0, false) }
+            return (self.queue, self.currentSong?.id, self.transport.position(), self.transport.isPlaying)
+        }
+        control.followRate = { [weak self] in self?.show?.defaultRate ?? .fps30 }
         refreshDevices()
         AudioDevices.observeChanges { [weak self] in
             Task { @MainActor in
@@ -329,10 +338,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func cue(_ song: Song, play: Bool? = nil) {
+    func cue(_ song: Song, play: Bool? = nil, at position: Double? = nil) {
         guard let show else { return }
         currentSongID = song.id
-        transport.load(song, in: show, play: play)
+        transport.load(song, in: show, play: play, at: position)
         transport.preload(nextSong, in: show)
         loadWaveform(for: song)
     }
@@ -383,8 +392,8 @@ final class AppModel: ObservableObject {
         save()
     }
 
-    func addMarker() {
-        guard screen == .timeline, let song = currentSong else { return }
+    func addMarker(remote: Bool = false) {
+        guard screen == .timeline || remote, let song = currentSong else { return }
         let tc = timecode(for: song, at: transport.position())
         withAnimation(.vivid(0.45)) {
             edit { show in
@@ -506,6 +515,46 @@ final class AppModel: ObservableObject {
         }
         if Timecode(text, rate: show.defaultRate) == nil { return "That isn't a timecode. Use HH:MM:SS:FF." }
         return "No song in this setlist plays at \(text)."
+    }
+
+    // MARK: Remote control and following timecode
+
+    /// A command from OSC or MIDI. Transport commands work in show mode; editing ones don't.
+    func handle(_ command: RemoteCommand) {
+        switch command {
+        case .play: transport.play()
+        case .stop: transport.pause()
+        case .toggle: transport.toggle()
+        case .next: next()
+        case .previous: previous()
+        case .top: transport.locate(transport.lowerBound)
+        case .marker: addMarker(remote: true)
+        case .song(let number):
+            if let s = queue.first(where: { $0.number == number }) ?? (number <= queue.count ? queue[number - 1] : nil) { cue(s) }
+        case .songTitle(let title):
+            if let s = queue.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) { cue(s) }
+        case .locate(let text):
+            if let problem = goTo(timecode: text) { post(problem) }
+        case .stopAfterEach(let on):
+            stopAfterEach = on
+        }
+    }
+
+    /// Carries out what following incoming timecode asks for.
+    func follow(_ actions: [ChaseEngine.Action]) {
+        var i = 0
+        while i < actions.count {
+            switch actions[i] {
+            case let .cue(id, at):
+                let playNext = i + 1 < actions.count && actions[i + 1] == .play
+                if let song = show?.song(id: id) { cue(song, play: playNext, at: at) }
+                if playNext { i += 1 }
+            case .play: transport.play()
+            case .stop: transport.pause()
+            case .locate(let s): transport.locate(s)
+            }
+            i += 1
+        }
     }
 
     // MARK: Fixing findings

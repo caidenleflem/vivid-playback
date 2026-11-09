@@ -26,6 +26,10 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Vivid Playback sends Art-Net timecode to your console and listens for OSC remote control on the show network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Vivid Playback reads incoming timecode (LTC) from an audio input when following another machine.</string>
 	<key>ATSApplicationFontsPath</key>
 	<string>Fonts</string>
 	<key>NSHumanReadableCopyright</key>

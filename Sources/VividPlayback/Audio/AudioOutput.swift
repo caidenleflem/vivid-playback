@@ -20,6 +20,15 @@ final class RenderState: @unchecked Sendable {
     /// The position after the last block, and when that block was rendered.
     var renderedPosition = 0
     var renderedAt: Double = 0
+    /// Peak level per output channel since the meters last read it (the UI resets it).
+    let peaks: UnsafeMutablePointer<Float> = {
+        let p = UnsafeMutablePointer<Float>.allocate(capacity: 64)
+        p.initialize(repeating: 0, count: 64)
+        return p
+    }()
+    /// Test timecode for line checks: sent on the timecode output only, while stopped.
+    var test: PlaybackBuffers?
+    var testPosition = 0
 }
 
 enum AudioOutputError: Error, CustomStringConvertible {
@@ -90,9 +99,15 @@ final class AudioOutput {
                     state.position = Mixer.render(state.buffers, position: state.position, frames: frames, into: outputs,
                                                   map: state.map, masterGain: state.masterGain,
                                                   timecodeGain: state.timecodeGain, loop: state.loop)
+                } else if let test = state.test {
+                    // Line check: timecode only, never the music, looping.
+                    state.testPosition = Mixer.render(test, position: state.testPosition, frames: frames, into: outputs,
+                                                      map: state.map, masterGain: 0, timecodeGain: state.timecodeGain,
+                                                      loop: LoopRegion(start: 0, end: test.frameCount))
                 } else {
                     for p in outputs { p?.update(repeating: 0, count: frames) }
                 }
+                Mixer.peaks(outputs, frames: frames, into: state.peaks, count: min(64, outputs.count))
                 state.renderedPosition = state.position
                 state.renderedAt = CACurrentMediaTime()
             }
