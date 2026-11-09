@@ -104,6 +104,8 @@ final class AppModel: ObservableObject {
     @Published var laneEdit: TriggerLane?
     /// A text field in the window has focus (single-key shortcuts stand aside).
     @Published var typingInField = false
+    /// A section of Connections to scroll to when it opens ("consoles").
+    var connectionsAnchor: String?
     @Published var showsShowTimecode = true
     @Published var importState: ImportState = .idle
     @Published var waveforms: [UUID: [Float]] = [:]
@@ -1045,6 +1047,7 @@ final class AppModel: ObservableObject {
         case "timeline": target = .timeline
         case "clock": target = .clock
         case "connections": target = .connections
+        case "consoles": target = .connections; connectionsAnchor = "consoles"
         case "albums": target = .albums
         default: return
         }

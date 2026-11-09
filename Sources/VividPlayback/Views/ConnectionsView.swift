@@ -135,18 +135,25 @@ struct ConnectionsView: View {
             Sidebar()
                 .frame(width: 224)
                 .padding(10)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 34) {
-                    header
-                    timecodeOut
-                    consolesSection
-                    follow
-                    remote
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 34) {
+                        header
+                        timecodeOut
+                        consolesSection.id("consoles")
+                        follow
+                        remote
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 64)
+                    .padding(.bottom, 40)
+                    .frame(maxWidth: 1100, alignment: .leading)
                 }
-                .padding(.horizontal, 28)
-                .padding(.top, 64)
-                .padding(.bottom, 40)
-                .frame(maxWidth: 1100, alignment: .leading)
+                .onAppear {
+                    guard let anchor = model.connectionsAnchor else { return }
+                    model.connectionsAnchor = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo(anchor, anchor: .top) }
+                }
             }
         }
         .onAppear { control.refreshDevices() }

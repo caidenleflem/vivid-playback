@@ -393,8 +393,14 @@ struct TimelinePanel: View {
                     .fill(color.opacity(selected ? 0.10 : 0.045))
                     .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .strokeBorder(color.opacity(selected ? 0.5 : 0), lineWidth: 1))
-                ForEach(triggers) { m in
-                    triggerTick(m, lane: lane, color: color, height: height, width: width, length: length)
+                ForEach(Array(triggers.enumerated()), id: \.element.id) { i, m in
+                    // Room for the label: up to the next trigger (or back to the previous one
+                    // when the label sits on the left near the end).
+                    let x = xPos(of: m, width: width, length: length)
+                    let next = i + 1 < triggers.count ? xPos(of: triggers[i + 1], width: width, length: length) : width
+                    let prev = i > 0 ? xPos(of: triggers[i - 1], width: width, length: length) : 0
+                    triggerTick(m, lane: lane, color: color, height: height, width: width, length: length,
+                                room: x > width * 0.88 ? x - prev - 10 : next - x - 10)
                 }
             }
             .frame(width: width, height: height)
@@ -459,21 +465,25 @@ struct TimelinePanel: View {
         return m.label == "Level" ? "\(Int(v))%" : "\(m.label) · \(Int(v))%"
     }
 
-    private func triggerTick(_ m: Marker, lane: TriggerLane, color: Color, height: CGFloat, width: CGFloat, length: Double) -> some View {
+    private func triggerTick(_ m: Marker, lane: TriggerLane, color: Color, height: CGFloat, width: CGFloat, length: Double,
+                             room: CGFloat) -> some View {
         let fired = control.firedAt[m.id].map { Date().timeIntervalSince($0) < 0.35 } ?? false
         let dx = dragging?.id == m.id ? dragging?.dx ?? 0 : 0
         let x = min(width, max(0, xPos(of: m, width: width, length: length) + dx))
         let flip = x > width * 0.88
-        let chip = Text(triggerText(m, lane: lane))
+        let text = triggerText(m, lane: lane)
+        // Labels that would run into the next trigger are left off (hover shows them).
+        let showLabel = height >= 24 && (dx != 0 || CGFloat(text.count) * 6.4 + 14 <= room)
+        let chip = Text(text)
             .font(.manrope(10.5, .semibold))
             .foregroundStyle(fired ? Color(hex: 0x120D05) : Brand.ink)
             .lineLimit(1)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(fired ? Brand.gold : Brand.phantom))
         return HStack(spacing: 5) {
-            if flip && height >= 24 { chip }
+            if flip && showLabel { chip }
             Capsule().fill(fired ? Brand.gold : color).frame(width: fired ? 3 : 2, height: max(8, height - 8))
-            if !flip && height >= 24 { chip }
+            if !flip && showLabel { chip }
         }
         .fixedSize()
         .shadow(color: fired ? Brand.gold.opacity(0.6) : .clear, radius: 6)
@@ -513,7 +523,7 @@ struct TimelinePanel: View {
             Divider()
             Button("Delete") { model.deleteMarker(m, in: song) }.disabled(model.locked)
         }
-        .help("\(m.time.description) · \(lane.commandLine(for: m) ?? triggerText(m, lane: lane)). Drag to move, right-click for more.")
+        .help("\(text) · \(m.time.description) · \(lane.commandLine(for: m) ?? "Fader \(lane.page).\(lane.executor)"). Drag to move, right-click for more.")
         .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .bottom)))
     }
 
