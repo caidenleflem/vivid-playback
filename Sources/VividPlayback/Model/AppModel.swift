@@ -515,6 +515,7 @@ final class AppModel: ObservableObject {
                 return try ShowImporter(reader: reader).importFolder(folder, name: "Example Tour 2027")
             }).value else { return }
             var show = report.show
+            show.routing.masterChannels = [1]
             show.routing.timecodeChannel = 2
             if target == .timeline, show.songs.count > 2 {
                 let song = show.songs[2]

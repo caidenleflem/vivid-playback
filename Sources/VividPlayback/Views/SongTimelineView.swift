@@ -121,6 +121,11 @@ struct TimelinePanel: View {
         VStack(alignment: .leading, spacing: 10) {
             GeometryReader { geo in
                 let trackWidth = geo.size.width - labelWidth - 12
+                // Lanes: ruler 22, waveform (fills what's left), timecode 26, markers 44, gaps 10.
+                let markerSpace: CGFloat = song.markers.isEmpty ? 0 : 54
+                let waveHeight = max(90, geo.size.height - 22 - 10 - 10 - 26 - markerSpace - 4)
+                let lanesHeight = 22 + 10 + waveHeight + 10 + 26 + markerSpace
+                let scrubLimit = 22 + 10 + waveHeight + 10 + 26
                 SongProgress { position, _ in
                     let p = CGFloat(min(1, max(0, position / length)))
                     let playheadX = trackWidth * p
@@ -128,7 +133,7 @@ struct TimelinePanel: View {
                         ruler(width: trackWidth, length: length)
                         lane("Master") {
                             WaveformView(peaks: model.waveforms[song.id] ?? [], progress: p)
-                                .frame(height: 260)
+                                .frame(height: waveHeight)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.02)))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
@@ -153,20 +158,20 @@ struct TimelinePanel: View {
                             let x1 = trackWidth * CGFloat(min(length, loop.upperBound) / length)
                             Rectangle().fill(Brand.gold.opacity(0.08))
                                 .overlay(alignment: .top) { Rectangle().fill(Brand.gold.opacity(0.6)).frame(height: 2) }
-                                .frame(width: max(2, x1 - x0), height: song.markers.isEmpty ? 330 : 384)
+                                .frame(width: max(2, x1 - x0), height: lanesHeight - 24)
                                 .offset(x: labelWidth + 12 + x0, y: 24)
                                 .allowsHitTesting(false)
                         }
-                        markerLines(width: trackWidth, length: length)
+                        markerLines(width: trackWidth, length: length, height: lanesHeight - 30)
                             .offset(x: labelWidth + 12)
-                        playhead(position: position)
+                        playhead(position: position, height: lanesHeight - 18)
                             .offset(x: labelWidth + 12 + playheadX - 1)
                     }
                     .contentShape(Rectangle())
                     .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { value in
                         // Scrub on the waveform and timecode lanes; the marker lane keeps its clicks.
                         let x = value.location.x - labelWidth - 12
-                        guard x >= 0, trackWidth > 0, value.startLocation.y < 330 else { return }
+                        guard x >= 0, trackWidth > 0, value.startLocation.y < scrubLimit else { return }
                         transport.locate(Double(x / trackWidth) * length)
                     })
                 }
@@ -283,17 +288,17 @@ struct TimelinePanel: View {
             .help("Click to go here. Right-click to rename or delete.")
     }
 
-    private func markerLines(width: CGFloat, length: Double) -> some View {
+    private func markerLines(width: CGFloat, length: Double, height: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(song.markers) { marker in
                 let x = width * CGFloat(Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond / length)
-                Rectangle().fill(Brand.gold.opacity(0.28)).frame(width: 1, height: 340).offset(x: x, y: 30)
+                Rectangle().fill(Brand.gold.opacity(0.28)).frame(width: 1, height: max(0, height)).offset(x: x, y: 30)
             }
         }
         .allowsHitTesting(false)
     }
 
-    private func playhead(position: Double) -> some View {
+    private func playhead(position: Double, height: CGFloat) -> some View {
         VStack(spacing: 0) {
             Text(model.timecode(for: song, at: position).description)
                 .font(.manrope(11, .bold).monospacedDigit())
@@ -302,7 +307,7 @@ struct TimelinePanel: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(Brand.gold))
                 .fixedSize()
                 .offset(x: 1)
-            Rectangle().fill(Brand.gold).frame(width: 2, height: song.markers.isEmpty ? 320 : 374)
+            Rectangle().fill(Brand.gold).frame(width: 2, height: max(0, height))
         }
         .frame(width: 2)
         .allowsHitTesting(false)
