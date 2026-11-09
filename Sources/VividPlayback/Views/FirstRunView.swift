@@ -40,6 +40,7 @@ struct FirstRunView: View {
                 .font(.manrope(14.5))
                 .foregroundStyle(Brand.steel)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 440)
             VStack(spacing: 6) {
                 Image(systemName: "folder").font(.system(size: 30, weight: .light)).foregroundStyle(Brand.champagne)
@@ -58,6 +59,7 @@ struct FirstRunView: View {
                     .font(.manrope(13))
                     .foregroundStyle(Brand.warn)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 480)
             }
             HStack(spacing: 10) {

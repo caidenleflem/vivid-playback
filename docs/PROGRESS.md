@@ -42,9 +42,14 @@
 - Song length is the master's length minus the file offset unless the sheet gives one.
 - Files with click, guide, cue, stem or vox in the name aren't masters.
 
-**Not yet verified**
-- The SwiftUI app has only been syntax-checked so far: the cloud container has no macOS SDK.
-  The first build on the Mac may need small fixes.
+**Built and checked on GitHub** (later the same day)
+- `.github/workflows/build.yml` builds on a GitHub Mac (macOS 15, Xcode 16.4) on every push to
+  main: runs the 36 tests, builds a universal (Apple silicon and Intel) app for macOS 13+, checks
+  the signature and resources, launches it on every screen, and publishes the .dmg as the
+  "Latest build" release. Screenshots of each screen go to the `ci-screens` branch.
+- Minimum macOS lowered to 13 (Caiden's Mac isn't on the newest macOS).
+- First screenshots match the renders. Fixed from them: the full-screen clock overflowing, the
+  first-run text truncating, and the minimum window size on small screens.
 
 **Next**
 1. First build and run on Caiden's Mac; fix anything the compiler finds; screenshots against

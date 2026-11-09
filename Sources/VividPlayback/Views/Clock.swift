@@ -98,7 +98,7 @@ struct ClockScreen: View {
             ZStack {
                 VStack(spacing: 20) {
                     StateChips()
-                    LiveClock(size: min(230, geo.size.width / 5.6), weight: .light)
+                    LiveClock(size: min(230, (geo.size.width - 96) / 5.7), weight: .light)
                         .matchedGeometryEffect(id: "clock", in: morph)
                     if let song = model.currentSong {
                         Text(song.title)

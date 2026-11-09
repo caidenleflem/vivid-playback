@@ -232,7 +232,7 @@ struct ClockHero: View {
                 .background(RoundedRectangle(cornerRadius: 9).fill(.white.opacity(0.06)))
             }
             GeometryReader { geo in
-                LiveClock(size: min(150, geo.size.width / 6.4), weight: .light, songTime: !model.showsShowTimecode)
+                LiveClock(size: min(150, geo.size.width / 6.2), weight: .light, songTime: !model.showsShowTimecode)
                     .matchedGeometryEffect(id: "clock", in: morph)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }

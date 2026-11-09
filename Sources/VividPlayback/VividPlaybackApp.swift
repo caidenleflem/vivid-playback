@@ -17,7 +17,7 @@ struct VividPlaybackApp: App {
             RootView()
                 .environmentObject(model)
                 .environmentObject(model.transport)
-                .frame(minWidth: 1080, minHeight: 700)
+                .frame(minWidth: 960, minHeight: 640)
                 .preferredColorScheme(.dark)
                 .onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }
         }
