@@ -164,7 +164,7 @@ struct TimelinePanel: View {
         .solidPanel()
         .onAppear {
             model.loadWaveform(for: song)
-            if reduceMotion { reveal = 1 } else { withAnimation(.smooth(duration: 0.7).delay(0.12)) { reveal = 1 } }
+            if reduceMotion { reveal = 1 } else { withAnimation(.vivid(0.7).delay(0.12)) { reveal = 1 } }
         }
     }
 

@@ -1,0 +1,57 @@
+name: Build
+
+# Every push to main builds the app on a GitHub Mac, runs the core tests, and publishes the
+# installer as the "Latest build" release (Releases page → Vivid Playback x.y.z.dmg).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Test the timecode core
+        run: swift test
+
+      - name: Build the installer
+        run: ./scripts/make-dmg.sh
+
+      - name: Check the app
+        run: |
+          APP="build/Vivid Playback.app"
+          lipo -info "$APP/Contents/MacOS/Vivid Playback"
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$APP/Contents/Info.plist"
+          codesign --verify --deep --verbose=2 "$APP"
+          ls "$APP/Contents/Resources/Fonts" "$APP/Contents/Resources/Images"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vivid-Playback
+          path: build/*.dmg
+
+      - name: Publish the Latest build release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest build/*.dmg \
+            --title "Latest build" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --notes "Built from ${GITHUB_SHA::7}. Download the .dmg, open it and drag Vivid Playback to Applications. The first time, macOS may block it: open System Settings › Privacy & Security and click Open Anyway (or right-click the app and choose Open)."

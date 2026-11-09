@@ -208,7 +208,7 @@ final class AppModel: ObservableObject {
     func go(_ target: Screen) {
         guard show != nil || target == .firstRun else { return }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.18) : .smooth(duration: 0.55)) { screen = target }
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.18) : .vivid(0.55)) { screen = target }
     }
 
     func toggleTimeline() { go(screen == .timeline ? .library : .timeline) }
@@ -220,7 +220,7 @@ final class AppModel: ObservableObject {
         guard screen == .timeline, var show, let song = currentSong, let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
         let tc = timecode(for: song, at: transport.position())
         let n = show.songs[i].markers.count + 1
-        withAnimation(.smooth(duration: 0.45)) {
+        withAnimation(.vivid(0.45)) {
             show.songs[i].markers.append(Marker(time: tc, label: "Marker \(n)"))
             show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
             self.show = show
@@ -252,11 +252,12 @@ final class AppModel: ObservableObject {
                 let report = try await Task.detached(priority: .userInitiated) {
                     try ShowImporter(reader: reader).importFolder(folder, progress: { step in
                         Task { @MainActor [weak self] in
-                            if case .running = self?.importState { self?.importState = .running(step) }
+                            guard let self else { return }
+                            if case .running = self.importState { self.importState = .running(step) }
                         }
                     })
                 }.value
-                withAnimation(.smooth(duration: 0.4)) { importState = .finished(report) }
+                withAnimation(.vivid(0.4)) { importState = .finished(report) }
             } catch {
                 importState = .failed(String(describing: error))
             }

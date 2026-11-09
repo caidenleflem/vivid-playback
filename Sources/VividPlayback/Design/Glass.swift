@@ -87,12 +87,32 @@ struct StatusDot: View {
         Circle().fill(color).frame(width: 7, height: 7)
             .opacity(pulsing && dim ? 0.35 : 1)
             .onAppear { update() }
-            .onChange(of: pulsing) { update() }
+            .onChange(of: pulsing) { _ in update() }
     }
 
     private func update() {
         guard pulsing, !reduceMotion else { dim = false; return }
         withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
+    }
+}
+
+extension Animation {
+    /// The app's motion: a critically damped spring (no bounce), like SwiftUI's `.smooth`.
+    static func vivid(_ duration: Double) -> Animation { .spring(response: duration, dampingFraction: 1) }
+}
+
+/// Gold bars for the playing song; they move while rolling (macOS 14 and later).
+struct PlayingIndicator: View {
+    var isPlaying: Bool
+
+    var body: some View {
+        if #available(macOS 14, *) {
+            Image(systemName: "waveform")
+                .foregroundStyle(Brand.gold)
+                .symbolEffect(.variableColor.iterative, isActive: isPlaying)
+        } else {
+            Image(systemName: "waveform").foregroundStyle(Brand.gold)
+        }
     }
 }
 

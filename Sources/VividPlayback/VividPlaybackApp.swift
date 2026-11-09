@@ -27,6 +27,7 @@ struct VividPlaybackApp: App {
     }
 }
 
+@MainActor
 struct PlaybackCommands: Commands {
     let model: AppModel
 

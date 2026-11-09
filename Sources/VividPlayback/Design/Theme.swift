@@ -102,6 +102,6 @@ struct Ambient: View {
             .opacity(0.5)
         }
         .ignoresSafeArea()
-        .animation(.smooth(duration: 0.9), value: song?.id)
+        .animation(.vivid(0.9), value: song?.id)
     }
 }

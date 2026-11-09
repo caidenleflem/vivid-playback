@@ -26,7 +26,7 @@ targets.append(
 
 let package = Package(
     name: "VividPlayback",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: products,
     targets: targets
 )

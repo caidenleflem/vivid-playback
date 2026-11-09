@@ -52,7 +52,7 @@ struct FirstRunView: View {
                     .strokeBorder(Brand.champagne.opacity(targeted ? 0.8 : 0.35), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
                     .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(targeted ? 0.05 : 0)))
             )
-            .animation(.smooth(duration: 0.2), value: targeted)
+            .animation(.vivid(0.2), value: targeted)
             if case .failed(let message) = model.importState {
                 Text(message)
                     .font(.manrope(13))

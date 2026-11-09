@@ -7,22 +7,21 @@ timecode clock. It's built to replace a Reaper session for this one job.
 It looks like Apple Music in the Vivid glass material: simple playback first, and a song's
 timeline only when you ask for it.
 
-## Build it (on a Mac)
+## Get the app
 
-1. Install **Xcode** from the App Store (free) and open it once so it finishes setting up.
-2. In Terminal, in this folder:
+Every push to `main` is built on a GitHub Mac. Download the newest installer from this repo's
+**Releases** page ("Latest build" → `Vivid Playback x.y.z.dmg`), open it and drag Vivid Playback
+to Applications. It runs on macOS 13 (Ventura) or later, on Apple silicon and Intel.
 
-   ```
-   ./scripts/make-dmg.sh
-   ```
+The first time you open it, macOS may block it because it isn't signed with an Apple Developer
+ID. Open **System Settings › Privacy & Security**, scroll down and click **Open Anyway** (on older
+macOS, right-click the app and choose **Open**). After that it opens normally. A Developer ID
+signature removes that step; it's optional.
 
-3. Open `build/Vivid Playback 0.1.0.dmg` and drag Vivid Playback to Applications.
+## Build it yourself
 
-The first time you open it, macOS may say it can't check the developer. Right-click the app,
-choose **Open**, then **Open** again. After that it opens normally. Signing it with an Apple
-Developer ID removes that step; it's optional.
-
-To work on it, open `Package.swift` in Xcode and press Run.
+Needs Apple's Command Line Tools (`xcode-select --install`) or Xcode. In Terminal, in this
+folder: `./scripts/make-dmg.sh`. The installer lands in `build/`.
 
 ## Use it
 
@@ -54,9 +53,10 @@ Shows are saved in `~/Documents/Vivid Playback` as `.vividshow` packages and reo
 
 ```
 Sources/PlaybackCore     Pure Swift: timecode, sheet import, file matching, LTC, checks. Tested.
-Sources/VividPlayback    The SwiftUI app (macOS 14 or later).
+Sources/VividPlayback    The SwiftUI app (macOS 13 or later).
 Tests/PlaybackCoreTests  `swift test`
 scripts/                 make-app.sh, make-dmg.sh
+.github/workflows        build.yml: test, build, publish the .dmg
 docs/                    PLAN.md, PROGRESS.md, IDEAS-CUEPOINTS.md
 ```
 

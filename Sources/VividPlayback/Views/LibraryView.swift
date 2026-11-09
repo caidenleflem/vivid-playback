@@ -317,9 +317,7 @@ struct SongList: View {
         return row {
             Group {
                 if isCurrent {
-                    Image(systemName: "waveform")
-                        .foregroundStyle(Brand.gold)
-                        .symbolEffect(.variableColor.iterative, isActive: transport.isPlaying)
+                    PlayingIndicator(isPlaying: transport.isPlaying)
                 } else {
                     Text("\(song.number ?? index)").foregroundStyle(Brand.graphite)
                 }
