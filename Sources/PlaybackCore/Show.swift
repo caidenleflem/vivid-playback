@@ -4,11 +4,17 @@ public struct Marker: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
     public var time: Timecode
     public var label: String
+    /// The executor lane this is a trigger on; nil for a plain marker.
+    public var laneID: UUID?
+    /// For fader lanes: the level to set, 0–100.
+    public var value: Double?
 
-    public init(id: UUID = UUID(), time: Timecode, label: String) {
+    public init(id: UUID = UUID(), time: Timecode, label: String, laneID: UUID? = nil, value: Double? = nil) {
         self.id = id
         self.time = time
         self.label = label
+        self.laneID = laneID
+        self.value = value
     }
 }
 
@@ -116,6 +122,8 @@ public struct Show: Codable, Hashable, Sendable {
     public var sheetFile: String?
     /// Keys of warnings Caiden hid (`ShowIssue.key`).
     public var dismissedIssues: [String]?
+    /// Executor lanes: each fires one MA3 executor from triggers on the song timelines.
+    public var triggerLanes: [TriggerLane]?
 
     public init(name: String, defaultRate: FrameRate = .fps30, mediaFolder: String? = nil, songs: [Song] = [],
                 setlists: [Setlist] = [], routing: OutputRouting = OutputRouting(), sheetMapping: ColumnMapping? = nil,
