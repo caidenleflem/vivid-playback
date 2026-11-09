@@ -55,7 +55,12 @@ extension View {
 /// Small rounded label ("30 fps", "Rolling").
 struct Chip<Leading: View>: View {
     let text: String
-    @ViewBuilder var leading: () -> Leading
+    let leading: () -> Leading
+
+    init(_ text: String, @ViewBuilder leading: @escaping () -> Leading) {
+        self.text = text
+        self.leading = leading
+    }
 
     var body: some View {
         HStack(spacing: 6) {
