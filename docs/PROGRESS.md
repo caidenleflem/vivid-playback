@@ -160,3 +160,15 @@ Found and fixed:
 - Builds are versioned (0.2.<build>) and each is its own release; File › Save, Save a Copy,
   Show in Finder.
 - 62 tests pass.
+
+## 2026-11-09: Hide crashed the app
+
+Caiden hit a crash clicking Hide. Likely causes, all fixed (not reproducible here):
+- The song popover resized itself while open (AppKit can crash on popover constraint loops).
+  It's now a fixed 440×360 and scrolls.
+- In the song timeline, hiding the last warning swapped the popover's anchor button for a
+  different chip while the popover was open. The button now stays and only its label changes.
+- Hide/Show again now apply on the next run-loop turn, without animation, so the clicked
+  button finishes before its row disappears.
+Builds: GitHub's macOS runners stopped picking up jobs (macos-14 is retired; macos-15 and
+macos-latest jobs sit queued). Caiden builds locally with `./scripts/make-dmg.sh` meanwhile.

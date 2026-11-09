@@ -180,22 +180,24 @@ final class AppModel: ObservableObject {
     func hiddenIssues(for song: Song) -> [ShowIssue] { hiddenIssues.filter { $0.songID == song.id } }
 
     /// Hiding a warning changes nothing about playback, so it's allowed in show mode too.
+    /// Applied just after the click, without animation: the button that was clicked may vanish.
     func dismiss(_ issue: ShowIssue) {
-        guard issue.canDismiss, var show else { return }
-        withAnimation(.vivid(0.3)) {
+        guard issue.canDismiss else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, var show = self.show else { return }
             show.dismiss(issue)
             self.show = show
+            self.save()
         }
-        save()
     }
 
     func restore(_ issue: ShowIssue) {
-        guard var show else { return }
-        withAnimation(.vivid(0.3)) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, var show = self.show else { return }
             show.restore(issue)
             self.show = show
+            self.save()
         }
-        save()
     }
 
     func cue(_ song: Song, play: Bool? = nil) {

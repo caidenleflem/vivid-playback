@@ -97,11 +97,16 @@ struct SongTimelineView: View {
                     case .none:
                         EmptyView()
                     }
-                    if issues.isEmpty && !transport.timecodeGenerated && song.hasTimecode {
-                        Chip("Timecode verified") { StatusDot(color: Brand.ok) }
-                    } else if !issues.isEmpty {
-                        Button { showIssues = true } label: {
-                            Chip(issues.count == 1 ? issues[0].title : "\(issues.count) things to check") { StatusDot(color: Brand.warn) }
+                    // One button that never leaves the screen while its popover is open (removing a
+                    // popover's anchor can crash on macOS); only its label changes.
+                    let hidden = model.hiddenIssues(for: song)
+                    if !issues.isEmpty || !hidden.isEmpty || showIssues || (!transport.timecodeGenerated && song.hasTimecode) {
+                        Button { if !issues.isEmpty || !hidden.isEmpty { showIssues = true } } label: {
+                            if issues.isEmpty {
+                                Chip(song.hasTimecode && !transport.timecodeGenerated ? "Timecode verified" : "Nothing to check") { StatusDot(color: Brand.ok) }
+                            } else {
+                                Chip(issues.count == 1 ? issues[0].title : "\(issues.count) things to check") { StatusDot(color: Brand.warn) }
+                            }
                         }
                         .buttonStyle(.plain)
                         .popover(isPresented: $showIssues, arrowEdge: .bottom) { SongIssuesPopover(song: song).environmentObject(model) }

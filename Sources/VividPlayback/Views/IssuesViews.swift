@@ -44,6 +44,7 @@ struct SongIssuesPopover: View {
     var body: some View {
         let active = model.issues(for: song)
         let hidden = model.hiddenIssues(for: song)
+        ScrollView {
         VStack(alignment: .leading, spacing: 10) {
             Text(song.title).font(.manrope(16, .semibold)).foregroundStyle(Brand.ink)
             if active.isEmpty {
@@ -53,7 +54,7 @@ struct SongIssuesPopover: View {
             ForEach(active.sorted { $0.severity > $1.severity }) { IssueRow(issue: $0) }
             if !hidden.isEmpty {
                 Button(showHidden ? "Hide the hidden warnings" : "\(hidden.count) hidden \(hidden.count == 1 ? "warning" : "warnings")") {
-                    withAnimation(.vivid(0.3)) { showHidden.toggle() }
+                    showHidden.toggle()
                 }
                 .buttonStyle(.plain)
                 .font(.manrope(12.5, .medium))
@@ -62,7 +63,10 @@ struct SongIssuesPopover: View {
             }
         }
         .padding(16)
-        .frame(width: 440)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // A fixed size: a popover that resizes itself while open can crash on some macOS versions.
+        .frame(width: 440, height: 360)
         .background(Brand.phantom)
         .preferredColorScheme(.dark)
     }
