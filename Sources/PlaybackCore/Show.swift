@@ -108,6 +108,8 @@ public struct Show: Codable, Hashable, Sendable {
     public var routing: OutputRouting
     public var sheetMapping: ColumnMapping?
     public var sheetFile: String?
+    /// Keys of warnings Caiden hid (`ShowIssue.key`).
+    public var dismissedIssues: [String]?
 
     public init(name: String, defaultRate: FrameRate = .fps30, mediaFolder: String? = nil, songs: [Song] = [],
                 setlists: [Setlist] = [], routing: OutputRouting = OutputRouting(), sheetMapping: ColumnMapping? = nil,
@@ -131,6 +133,26 @@ public struct Show: Codable, Hashable, Sendable {
     }
 
     public func song(id: UUID) -> Song? { songs.first { $0.id == id } }
+
+    public func isDismissed(_ issue: ShowIssue) -> Bool {
+        issue.canDismiss && (dismissedIssues ?? []).contains(issue.key)
+    }
+
+    public mutating func dismiss(_ issue: ShowIssue) {
+        guard issue.canDismiss, !isDismissed(issue) else { return }
+        dismissedIssues = (dismissedIssues ?? []) + [issue.key]
+    }
+
+    public mutating func restore(_ issue: ShowIssue) {
+        dismissedIssues?.removeAll { $0 == issue.key }
+    }
+
+    /// Forgets hidden findings that no longer exist, so the list doesn't grow forever.
+    public mutating func pruneDismissed(keeping current: [ShowIssue]) {
+        guard let d = dismissedIssues else { return }
+        let live = Set(current.map(\.key))
+        dismissedIssues = d.filter(live.contains)
+    }
 }
 
 /// Saves and opens `.vividshow` packages: a folder holding `show.json`.

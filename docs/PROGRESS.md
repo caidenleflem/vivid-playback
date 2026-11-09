@@ -147,3 +147,16 @@ Found and fixed:
 - Chips say where timecode comes from: "from file", "generated from the sheet", "no timecode
   found in <file>", "can't be read". The timeline header shows the file's first timecode.
 - 58 tests pass, including a file whose LTC differs from the sheet and an unreadable file.
+
+## 2026-11-09: findings per song, and hiding minor ones
+
+- Click a song's status in the list (or the warning chip in its timeline) for a popover with
+  everything wrong with that song, in full. The status shows "+N" when there's more than one.
+- Warnings can be hidden (Hide); errors (missing master, unreadable file) can't. Hidden ones are
+  saved with the show (`Show.dismissedIssues`, keyed by song, kind and exact wording), so a
+  problem that changes comes back. The Issues list groups by song, has "Hide all warnings" per
+  song and a Hidden section with "Show again". The sidebar badge counts only what's showing.
+- Hiding is allowed in show mode (it doesn't touch playback).
+- Builds are versioned (0.2.<build>) and each is its own release; File › Save, Save a Copy,
+  Show in Finder.
+- 62 tests pass.

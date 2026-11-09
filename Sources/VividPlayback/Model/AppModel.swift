@@ -173,7 +173,30 @@ final class AppModel: ObservableObject {
         return q[i + 1]
     }
 
-    func issues(for song: Song) -> [ShowIssue] { issues.filter { $0.songID == song.id } }
+    /// Findings still showing (warnings Caiden hid are left out).
+    var activeIssues: [ShowIssue] { issues.filter { !(show?.isDismissed($0) ?? false) } }
+    var hiddenIssues: [ShowIssue] { issues.filter { show?.isDismissed($0) ?? false } }
+    func issues(for song: Song) -> [ShowIssue] { activeIssues.filter { $0.songID == song.id } }
+    func hiddenIssues(for song: Song) -> [ShowIssue] { hiddenIssues.filter { $0.songID == song.id } }
+
+    /// Hiding a warning changes nothing about playback, so it's allowed in show mode too.
+    func dismiss(_ issue: ShowIssue) {
+        guard issue.canDismiss, var show else { return }
+        withAnimation(.vivid(0.3)) {
+            show.dismiss(issue)
+            self.show = show
+        }
+        save()
+    }
+
+    func restore(_ issue: ShowIssue) {
+        guard var show else { return }
+        withAnimation(.vivid(0.3)) {
+            show.restore(issue)
+            self.show = show
+        }
+        save()
+    }
 
     func cue(_ song: Song, play: Bool? = nil) {
         guard let show else { return }
@@ -549,12 +572,14 @@ final class AppModel: ObservableObject {
             }.value
             self.issues = issues
             guard var current = self.show else { return }
+            current.pruneDismissed(keeping: issues)
             for (i, song) in current.songs.enumerated() {
                 guard let fresh = checked.song(id: song.id) else { continue }
                 if song.length == nil { current.songs[i].length = fresh.length }
                 if song.timecodeFileChannel == nil { current.songs[i].timecodeFileChannel = fresh.timecodeFileChannel }
             }
             self.show = current
+            self.save()
         }
     }
 

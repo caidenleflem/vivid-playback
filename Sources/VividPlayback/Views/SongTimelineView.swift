@@ -7,6 +7,7 @@ struct SongTimelineView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
     let morph: Namespace.ID
+    @State private var showIssues = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,10 +100,11 @@ struct SongTimelineView: View {
                     if issues.isEmpty && !transport.timecodeGenerated && song.hasTimecode {
                         Chip("Timecode verified") { StatusDot(color: Brand.ok) }
                     } else if !issues.isEmpty {
-                        Button { model.issuesShown = true } label: {
+                        Button { showIssues = true } label: {
                             Chip(issues.count == 1 ? issues[0].title : "\(issues.count) things to check") { StatusDot(color: Brand.warn) }
                         }
                         .buttonStyle(.plain)
+                        .popover(isPresented: $showIssues, arrowEdge: .bottom) { SongIssuesPopover(song: song).environmentObject(model) }
                     }
                 }
                 HStack(spacing: 22) {

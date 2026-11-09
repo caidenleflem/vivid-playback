@@ -13,7 +13,12 @@ public struct ShowIssue: Hashable, Identifiable, Sendable {
         case overlap, duplicateStart
     }
 
-    public var id: String { "\(songID?.uuidString ?? "show")-\(kind.rawValue)-\(message.hashValue)" }
+    public var id: String { key }
+    /// Stable across launches: the song, the kind and the exact wording. If the problem
+    /// changes (one frame late becomes three), the wording changes and a hidden finding returns.
+    public var key: String { "\(songID?.uuidString ?? "show")|\(kind.rawValue)|\(message)" }
+    /// Only warnings can be hidden. A missing master or an unreadable file always shows.
+    public var canDismiss: Bool { severity == .warning }
     public var severity: Severity
     public var kind: Kind
     public var songID: UUID?

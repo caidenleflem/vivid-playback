@@ -98,7 +98,7 @@ struct Sidebar: View {
             }
 
             section("Check") {
-                navRow("Issues", selected: false, badge: model.issues.isEmpty ? nil : model.issues.count) {
+                navRow("Issues", selected: false, badge: model.activeIssues.isEmpty ? nil : model.activeIssues.count) {
                     model.issuesShown = true
                 }
             }
@@ -337,6 +337,7 @@ struct SongList: View {
     @EnvironmentObject private var transport: Transport
     @State private var selected: UUID?
     @State private var dropTarget: UUID?
+    @State private var issuesFor: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -399,11 +400,25 @@ struct SongList: View {
             Text(song.hasTimecode ? song.start.description : "—").frame(width: 150, alignment: .leading)
             Text(song.length.map(TimeFormat.clock) ?? "—").frame(width: 84, alignment: .leading)
             Text(song.hasTimecode ? song.rate.shortName : "—").frame(width: 80, alignment: .leading)
-            HStack(spacing: 8) {
-                StatusDot(color: skipped ? Brand.graphite : statusColor(issues))
-                Text(skipped ? "Skipped tonight" : (issues.isEmpty && !song.hasTimecode ? "Ready · no timecode" : statusText(issues))).lineLimit(1)
+            Button { if !issues.isEmpty || !model.hiddenIssues(for: song).isEmpty { issuesFor = song.id } } label: {
+                HStack(spacing: 8) {
+                    StatusDot(color: skipped ? Brand.graphite : statusColor(issues))
+                    Text(skipped ? "Skipped tonight" : (issues.isEmpty && !song.hasTimecode ? "Ready · no timecode" : statusText(issues))).lineLimit(1)
+                    if issues.count > 1 && !skipped {
+                        Text("+\(issues.count - 1)").font(.manrope(11, .bold)).foregroundStyle(Brand.space)
+                    }
+                    if !issues.isEmpty && !skipped {
+                        Image(systemName: "info.circle").font(.system(size: 11)).foregroundStyle(Brand.space)
+                    }
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .frame(width: 180, alignment: .leading)
+            .help(issues.isEmpty ? "" : "Click to see what's wrong with \(song.title)")
+            .popover(isPresented: Binding(get: { issuesFor == song.id }, set: { if !$0 { issuesFor = nil } }), arrowEdge: .leading) {
+                SongIssuesPopover(song: song).environmentObject(model)
+            }
         }
         .opacity(skipped ? 0.45 : 1)
         .font(.manrope(13).monospacedDigit())
