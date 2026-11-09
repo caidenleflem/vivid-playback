@@ -9,12 +9,13 @@ import PlaybackCore
 /// and a gold hairline across the top when it's live.
 struct ConnectionCard<Content: View>: View {
     var active = false
+    var minHeight: CGFloat = 0
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         content()
             .padding(20)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(LinearGradient(colors: [Color(hex: 0x15151A), Brand.solid], startPoint: .top, endPoint: .bottom))
@@ -178,7 +179,7 @@ struct ConnectionsView: View {
     private var ltcTile: some View {
         let routed = transport.timecodeRouted && transport.audio.isRunning
         let channel = model.show?.routing.timecodeChannel
-        return ConnectionCard(active: routed) {
+        return ConnectionCard(active: routed, minHeight: 268) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top) {
                     IconWell(symbol: "waveform", active: routed)
@@ -211,7 +212,7 @@ struct ConnectionsView: View {
     private var mtcTile: some View {
         let on = control.settings.mtcOut
         let dest = control.midiDestinations.first { $0.id == control.settings.mtcDestination }
-        return ConnectionCard(active: on) {
+        return ConnectionCard(active: on, minHeight: 268) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top) {
                     IconWell(symbol: "pianokeys", active: on)
@@ -249,7 +250,7 @@ struct ConnectionsView: View {
     private var artNetTile: some View {
         let on = control.settings.artNetOut
         let target = control.settings.artNetTarget
-        return ConnectionCard(active: on) {
+        return ConnectionCard(active: on, minHeight: 268) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top) {
                     IconWell(symbol: "network", active: on)

@@ -35,9 +35,18 @@ struct AlbumsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
                     Text("Albums").font(.manrope(34, .bold)).foregroundStyle(Brand.ink).padding(.top, 70)
-                    if model.library.isEmpty {
-                        Text("Imported shows appear here, one album per setlist, grouped by artist.")
-                            .font(.manrope(14)).foregroundStyle(Brand.steel)
+                    if entries.isEmpty {
+                        VStack(spacing: 16) {
+                            Image(systemName: "square.stack")
+                                .font(.system(size: 44, weight: .light))
+                                .foregroundStyle(Brand.champagne)
+                            Text("Your shows live here").font(.manrope(22, .semibold)).foregroundStyle(Brand.ink)
+                            Text("Every imported show appears as albums, one per setlist, grouped by artist.")
+                                .font(.manrope(14)).foregroundStyle(Brand.steel).multilineTextAlignment(.center)
+                            Button("Import a show…") { model.chooseFolder() }.buttonStyle(QuietButtonStyle(prominent: true))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 80)
                     }
                     ForEach(groups, id: \.artist) { group in
                         VStack(alignment: .leading, spacing: 14) {
@@ -59,10 +68,20 @@ struct AlbumsView: View {
         .onAppear { model.refreshLibrary() }
     }
 
+    /// Saved shows, plus the open one if it's kept somewhere else.
+    private var entries: [ShowLibrary.Entry] {
+        var list = model.library
+        if let show = model.show, let url = model.packageURL,
+           !list.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+            list.insert(ShowLibrary.Entry(url: url, show: show), at: 0)
+        }
+        return list
+    }
+
     private var groups: [(artist: String, albums: [(entry: ShowLibrary.Entry, setlist: Setlist)])] {
         var order: [String] = []
         var byArtist: [String: [(entry: ShowLibrary.Entry, setlist: Setlist)]] = [:]
-        for entry in model.library {
+        for entry in entries {
             let artist = entry.show.artist ?? "No artist"
             if byArtist[artist] == nil { order.append(artist) }
             for list in entry.show.setlists { byArtist[artist, default: []].append((entry, list)) }
