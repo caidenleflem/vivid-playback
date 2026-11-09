@@ -942,7 +942,14 @@ final class AppModel: ObservableObject {
         case "library": target = .library
         case "timeline": target = .timeline
         case "clock": target = .clock
+        case "connections": target = .connections
+        case "albums": target = .albums
         default: return
+        }
+        if target == .connections {
+            control.settings.mtcOut = true
+            control.settings.artNetOut = true
+            control.settings.oscIn = true
         }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
         let reader = self.reader
