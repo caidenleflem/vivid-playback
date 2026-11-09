@@ -25,12 +25,14 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     /// Paths relative to the show's media folder (or absolute, for files elsewhere).
     public var masterPath: String?
     public var timecodePath: String?
+    /// Which channel of the timecode file holds the LTC (0-based), as found on import.
+    public var timecodeFileChannel: Int?
     public var notes: String?
     public var markers: [Marker]
 
     public init(id: UUID = UUID(), number: Int? = nil, title: String, start: Timecode, fileOffset: Double = 0,
                 length: Double? = nil, masterPath: String? = nil, timecodePath: String? = nil,
-                notes: String? = nil, markers: [Marker] = []) {
+                timecodeFileChannel: Int? = nil, notes: String? = nil, markers: [Marker] = []) {
         self.id = id
         self.number = number
         self.title = title
@@ -39,6 +41,7 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
         self.length = length
         self.masterPath = masterPath
         self.timecodePath = timecodePath
+        self.timecodeFileChannel = timecodeFileChannel
         self.notes = notes
         self.markers = markers
     }

@@ -72,8 +72,8 @@ final class ImportTests: XCTestCase {
 
     func testMissingSheetAndSpreadsheets() throws {
         XCTAssertThrowsError(try ShowImporter().importFolder(dir)) { XCTAssertEqual($0 as? ImportError, .noSheet) }
-        try Data().write(to: dir.appendingPathComponent("Offsets.xlsx"))
-        XCTAssertThrowsError(try ShowImporter().importFolder(dir)) { XCTAssertEqual($0 as? ImportError, .spreadsheetNeedsExport("Offsets.xlsx")) }
+        try Data().write(to: dir.appendingPathComponent("Offsets.numbers"))
+        XCTAssertThrowsError(try ShowImporter().importFolder(dir)) { XCTAssertEqual($0 as? ImportError, .spreadsheetNeedsExport("Offsets.numbers")) }
     }
 
     func testOverlapAcrossSongs() {

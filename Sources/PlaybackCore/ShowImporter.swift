@@ -30,12 +30,14 @@ public enum ImportError: Error, CustomStringConvertible, Equatable {
     case noSheet
     case spreadsheetNeedsExport(String)
     case emptySheet(String)
+    case unreadableSheet(String)
 
     public var description: String {
         switch self {
         case .noSheet: return "There's no offset sheet in the folder. Add a CSV or tab-separated export of it."
-        case .spreadsheetNeedsExport(let name): return "\(name) is an Excel or Numbers file. Export it as CSV (File › Export To › CSV) and drop the folder again."
+        case .spreadsheetNeedsExport(let name): return "\(name) can't be read directly. Export it as .xlsx or CSV (in Numbers: File › Export To) and drop the folder again."
         case .emptySheet(let name): return "\(name) has no songs in it that could be read."
+        case .unreadableSheet(let name): return "\(name) couldn't be opened. Save it again from Excel or Numbers, or export it as CSV."
         }
     }
 }
@@ -51,8 +53,8 @@ public struct ShowImporter: Sendable {
         self.defaultRate = defaultRate
     }
 
-    static let sheetExtensions: Set<String> = ["csv", "tsv", "txt"]
-    static let spreadsheetExtensions: Set<String> = ["xlsx", "xls", "numbers"]
+    static let sheetExtensions: Set<String> = ["csv", "tsv", "txt", "xlsx"]
+    static let spreadsheetExtensions: Set<String> = ["xls", "numbers"]
 
     public static func listFiles(in folder: URL, depth: Int = 3) -> [URL] {
         let fm = FileManager.default
@@ -71,9 +73,20 @@ public struct ShowImporter: Sendable {
 
     /// The sheet to use: a name that says what it is wins ("Tour Offsets.csv"), else the first.
     static func pickSheet(_ files: [URL]) -> URL? {
-        let sheets = files.filter { sheetExtensions.contains($0.pathExtension.lowercased()) }
+        let sheets = files.filter { sheetExtensions.contains($0.pathExtension.lowercased()) && !$0.lastPathComponent.hasPrefix("~$") }
         let words = ["offset", "timecode", "tc", "sheet", "setlist", "cue"]
         return sheets.first { url in words.contains { url.lastPathComponent.lowercased().contains($0) } } ?? sheets.first
+    }
+
+    /// Reads a CSV, tab-separated or Excel (.xlsx) offset sheet.
+    public static func readSheet(_ url: URL, mapping: ColumnMapping? = nil, defaultRate: FrameRate = .fps30) throws -> OffsetSheet {
+        let data = try Data(contentsOf: url)
+        if url.pathExtension.lowercased() == "xlsx" {
+            guard let table = try? XLSXReader.table(from: data) else { throw ImportError.unreadableSheet(url.lastPathComponent) }
+            return OffsetSheetParser.read(table: table, mapping: mapping, defaultRate: defaultRate)
+        }
+        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        return OffsetSheetParser.read(text: text, mapping: mapping, defaultRate: defaultRate)
     }
 
     public func importFolder(_ folder: URL, name: String? = nil, mapping: ColumnMapping? = nil,
@@ -87,9 +100,7 @@ public struct ShowImporter: Sendable {
             throw ImportError.noSheet
         }
         progress?(.readingSheet(sheetURL.lastPathComponent))
-        let data = try Data(contentsOf: sheetURL)
-        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
-        let sheet = OffsetSheetParser.read(text: text, mapping: mapping, defaultRate: defaultRate)
+        let sheet = try Self.readSheet(sheetURL, mapping: mapping, defaultRate: defaultRate)
         let usable = sheet.rows.filter { $0.start != nil }
         guard !usable.isEmpty else { throw ImportError.emptySheet(sheetURL.lastPathComponent) }
 
@@ -111,6 +122,7 @@ public struct ShowImporter: Sendable {
                         songs: songs, sheetMapping: sheet.mapping, sheetFile: ShowStore.relativePath(of: sheetURL, in: folder))
 
         let checked = check(&show, progress: progress)
+        for (i, song) in show.songs.enumerated() { show.songs[i].timecodeFileChannel = checked.channels[song.id] }
         show.setlists = [Setlist(name: "Full show", songIDs: show.songs.map(\.id))]
         progress?(.done)
         return ImportReport(show: show, sheetURL: sheetURL, sheetProblems: sheet.problems, ambiguities: match.ambiguities,

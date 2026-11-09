@@ -327,7 +327,10 @@ public enum OffsetSheetParser {
     }
 
     public static func read(text: String, mapping: ColumnMapping? = nil, defaultRate: FrameRate = .fps30) -> OffsetSheet {
-        let table = DelimitedText.parse(text)
+        read(table: DelimitedText.parse(text), mapping: mapping, defaultRate: defaultRate)
+    }
+
+    public static func read(table: [[String]], mapping: ColumnMapping? = nil, defaultRate: FrameRate = .fps30) -> OffsetSheet {
         let map = mapping ?? guessMapping(table)
         let rate = commonRate(table, mapping: map, fallback: defaultRate)
         var problems: [String] = []
