@@ -17,6 +17,8 @@ struct ControlSettings: Codable, Equatable {
     var follow: FollowSource = .off
     var ltcInputUID: String?
     var ltcInputChannel = 1
+    var consoles: [ConsoleTarget] = []
+    var fireEarlyMs: Double = 0
 
     static func load() -> ControlSettings {
         guard let data = UserDefaults.standard.data(forKey: "controlSettings"),
@@ -104,6 +106,13 @@ final class ControlCenter: ObservableObject {
 
     let midi = MIDIService()
     let sender: TimecodeSender
+    let triggers: TriggerService
+    /// When each trigger last fired (for the gold flash in the timeline).
+    @Published private(set) var firedAt: [UUID: Date] = [:]
+    /// The last trigger sent, for the Consoles section.
+    @Published private(set) var lastTrigger: (text: String, ok: Bool, at: Date)?
+    /// Set by the app model: re-arm triggers when consoles or timing change.
+    var onTriggerSettingsChange: (() -> Void)?
     private let netQueue = DispatchQueue(label: "vivid.network.in", qos: .userInteractive)
     private var osc: UDPSocket?
     private var artNetIn: UDPSocket?
@@ -120,6 +129,13 @@ final class ControlCenter: ObservableObject {
 
     init(clock: OutputClock) {
         sender = TimecodeSender(clock: clock, midi: midi)
+        triggers = TriggerService(clock: clock)
+        triggers.onFire = { [weak self] id in
+            Task { @MainActor in self?.firedAt[id] = Date() }
+        }
+        triggers.onSend = { [weak self] text, ok in
+            Task { @MainActor in self?.lastTrigger = (text, ok, Date()) }
+        }
         refreshDevices()
         midi.onSetupChange = { [weak self] in self?.refreshDevices() }
         midi.setReceiver { [weak self] message in
@@ -141,6 +157,7 @@ final class ControlCenter: ObservableObject {
     // MARK: Applying settings
 
     private func apply(old: ControlSettings?) {
+        if old?.consoles != settings.consoles || old?.fireEarlyMs != settings.fireEarlyMs { onTriggerSettingsChange?() }
         sender.configure(.init(mtc: settings.mtcOut, mtcDestination: settings.mtcDestination,
                                artNet: settings.artNetOut, artNetTarget: settings.artNetTarget))
         if old?.oscIn != settings.oscIn || old?.oscPort != settings.oscPort { startOSC() }

@@ -243,3 +243,28 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 - Latency: output latency now includes the device latency, safety offset, stream latency and the
   IO buffer (for every interface), so the clock, MTC and Art-Net line up with the timecode as
   it's heard. The Dante card shows the figure.
+
+## 2026-11-09: grandMA3 trigger lanes
+
+- Core (`Triggers.swift`, tested): `ConsoleTarget` (name, IP, port, prefix, on/off),
+  `TriggerLane` (page, executor, action: Go+, Go−, Top, On, Off, fader level or a custom command
+  line with {page} {exec} {label} {value}; which consoles; colour; mute), and
+  `TriggerScheduler`, which fires what the playhead crosses while playing forward and re-arms
+  without firing after a locate, loop or song change.
+- Triggers are markers with a `laneID` (and a `value` for fader levels), so they save with the
+  song and survive everything markers already survive. Lanes are show-wide; plain markers are
+  unchanged and loops still use plain markers only.
+- `TriggerService`: a 2 ms high-priority timer reads the heard position from `OutputClock`
+  (latency included), moved earlier by Fire early, and sends OSC over UDP. The UI only shows the
+  gold flash afterwards, so a busy screen can't make a cue late.
+- Timeline: a row per lane (title, executor, console, warnings when no console is reachable,
+  mute), coloured trigger ticks with labels, **C** at the playhead on the chosen lane,
+  double-click to place, drag to move, right-click for level, nudge a frame, move to playhead,
+  fire now, delete. The chosen lane's triggers show faintly through the waveform.
+- Lane editor with a live preview of the exact OSC going to each console, and Fire now.
+- Connections › Consoles: console cards, the MA3 setup steps, Fire early (0–200 ms), and the
+  last trigger sent (with a warning if it couldn't leave the Mac).
+- Single-key shortcuts now stand aside while a text field on the Connections page has focus.
+- grandMA3 OSC: `/gma3/cmd` with a command string needs Receive Command on; fader lanes use
+  `/gma3/Page{p}/Fader{e}` with 0–100. **Needs a check on a real console** (or onPC).
+- 88 tests pass.

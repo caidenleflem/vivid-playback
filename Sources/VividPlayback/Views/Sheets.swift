@@ -316,24 +316,254 @@ struct RenameMarkerSheet: View {
     let marker: Marker
     let song: Song
     @State private var text = ""
+    @State private var level: Double = 100
+
+    private var lane: TriggerLane? { model.lanes.first { $0.id == marker.laneID } }
+    private var hasValue: Bool { lane?.action == .fader || lane?.action == .custom }
 
     var body: some View {
-        SheetFrame(title: "Rename marker", width: 420) {
-            TextField("Marker name", text: $text)
+        SheetFrame(title: lane == nil ? "Rename marker" : "Trigger", subtitle: lane.map { "On \($0.title), at \(marker.time.description)." }, width: 440) {
+            TextField(lane == nil ? "Marker name" : "Trigger name", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .font(.manrope(15))
                 .onSubmit(save)
+            if hasValue, let lane {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(lane.action == .fader ? "Fader level" : "Value for {value}")
+                            .font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel)
+                        Spacer()
+                        Text(lane.action == .fader ? "\(Int(level))%" : "\(Int(level))")
+                            .font(.manrope(13, .semibold).monospacedDigit()).foregroundStyle(Brand.ink)
+                    }
+                    Slider(value: $level, in: 0...100, step: 1).tint(Brand.gold)
+                }
+            }
             HStack {
-                Button("Delete marker") { model.deleteMarker(marker, in: song); dismiss() }.buttonStyle(QuietButtonStyle())
+                Button(lane == nil ? "Delete marker" : "Delete trigger") { model.deleteMarker(marker, in: song); dismiss() }
+                    .buttonStyle(QuietButtonStyle())
                 Spacer()
                 Button("Save", action: save).buttonStyle(QuietButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
             }
         }
-        .onAppear { text = marker.label }
+        .onAppear {
+            text = marker.label
+            level = marker.value ?? 100
+        }
     }
 
     private func save() {
         model.renameMarker(marker, in: song, to: text)
+        if hasValue { model.setLevel(marker, in: song, to: level) }
         dismiss()
+    }
+}
+
+/// One executor lane: what it fires, and on which consoles.
+struct LaneEditor: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var control: ControlCenter
+    @Environment(\.dismiss) private var dismiss
+    @State var lane: TriggerLane
+
+    private var isNew: Bool { !model.lanes.contains { $0.id == lane.id } }
+    private var consoles: [ConsoleTarget] { control.settings.consoles }
+
+    private static let actions: [LaneAction] = [.goPlus, .goMinus, .top, .on, .off, .fader, .custom]
+    private static func short(_ a: LaneAction) -> String {
+        switch a {
+        case .fader: return "Fader"
+        case .custom: return "Custom"
+        default: return a.label
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center, spacing: 14) {
+                RoundedRectangle(cornerRadius: 3).fill(Brand.lane(lane.color)).frame(width: 6, height: 40)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isNew ? "New trigger lane" : "Edit lane").font(.manrope(22, .semibold)).foregroundStyle(Brand.ink)
+                    Text("Each trigger on this lane fires an executor on your grandMA3 over OSC.")
+                        .font(.manrope(13)).foregroundStyle(Brand.steel)
+                }
+                Spacer()
+            }
+
+            field("Name") {
+                TextField("\(lane.page).\(lane.executor) · \(lane.action.label)", text: $lane.name)
+                    .textFieldStyle(.roundedBorder).font(.manrope(14))
+            }
+
+            field("Executor") {
+                HStack(spacing: 10) {
+                    numberBox("Page", value: $lane.page)
+                    Text(".").font(.manrope(18, .semibold)).foregroundStyle(Brand.graphite)
+                    numberBox("Exec", value: $lane.executor)
+                    Text("Page \(lane.page), executor \(lane.executor)").font(.manrope(12)).foregroundStyle(Brand.graphite)
+                        .padding(.leading, 6)
+                }
+            }
+
+            field("Action") {
+                VStack(alignment: .leading, spacing: 10) {
+                    PillPicker(options: Self.actions, selection: $lane.action) { Self.short($0) }
+                    switch lane.action {
+                    case .fader:
+                        Text("Each trigger sets the fader to its level. New triggers start at 100%; right-click one to change it.")
+                            .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+                    case .custom:
+                        TextField("Go+ Exec {page}.{exec}", text: Binding(get: { lane.command ?? "" }, set: { lane.command = $0 }))
+                            .textFieldStyle(.roundedBorder).font(.system(size: 13, design: .monospaced))
+                        Text("Any command line. {page} and {exec} are this lane's executor, {label} the trigger's name, {value} its value.")
+                            .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+
+            field("Consoles") {
+                if consoles.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Brand.warn)
+                        Text("No consoles yet.").font(.manrope(13)).foregroundStyle(Brand.steel)
+                        Button("Set up in Connections…") {
+                            model.saveLane(clean)
+                            dismiss()
+                            model.go(.connections)
+                        }
+                        .buttonStyle(QuietButtonStyle())
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle(isOn: Binding(get: { lane.consoleIDs.isEmpty },
+                                             set: { lane.consoleIDs = $0 ? [] : consoles.map(\.id) })) {
+                            Text("Every console").font(.manrope(13, .medium)).foregroundStyle(Brand.ink)
+                        }
+                        .toggleStyle(.checkbox)
+                        ForEach(consoles) { c in
+                            Toggle(isOn: Binding(
+                                get: { lane.consoleIDs.isEmpty || lane.consoleIDs.contains(c.id) },
+                                set: { on in
+                                    var ids = lane.consoleIDs.isEmpty ? consoles.map(\.id) : lane.consoleIDs
+                                    if on { if !ids.contains(c.id) { ids.append(c.id) } } else { ids.removeAll { $0 == c.id } }
+                                    lane.consoleIDs = Set(ids) == Set(consoles.map(\.id)) ? [] : ids
+                                })) {
+                                HStack(spacing: 8) {
+                                    Text(c.name.isEmpty ? "Console" : c.name).font(.manrope(13, .medium)).foregroundStyle(Brand.ink)
+                                    Text(c.host.isEmpty ? "no address" : "\(c.host):\(c.port)")
+                                        .font(.manrope(12).monospacedDigit()).foregroundStyle(c.host.isEmpty ? Brand.warn : Brand.graphite)
+                                    if !c.enabled { Text("off").font(.manrope(11, .semibold)).foregroundStyle(Brand.warn) }
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(lane.consoleIDs.isEmpty)
+                        }
+                    }
+                }
+            }
+
+            field("Colour") {
+                HStack(spacing: 10) {
+                    ForEach(0..<Brand.laneColors.count, id: \.self) { i in
+                        Button { lane.color = i } label: {
+                            Circle().fill(Brand.lane(i)).frame(width: 20, height: 20)
+                                .overlay(Circle().strokeBorder(Brand.ink, lineWidth: lane.color == i ? 2 : 0).padding(-4))
+                                .padding(4)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Colour \(i + 1)")
+                    }
+                }
+            }
+
+            preview
+
+            HStack(spacing: 10) {
+                if !isNew {
+                    Button("Delete lane") { model.deleteLane(lane); dismiss() }.buttonStyle(QuietButtonStyle())
+                }
+                Button { model.fireLane(clean) } label: { Label("Fire now", systemImage: "bolt.fill") }
+                    .buttonStyle(QuietButtonStyle())
+                    .disabled(clean.targets(in: consoles).isEmpty)
+                    .help("Sends this lane's command once, to check the console responds.")
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add lane" : "Save") { model.saveLane(clean); dismiss() }
+                    .buttonStyle(QuietButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 600)
+        .background(Brand.phantom)
+        .preferredColorScheme(.dark)
+    }
+
+    /// The lane as it will be saved: numbers in range, an empty command dropped.
+    private var clean: TriggerLane {
+        var l = lane
+        l.page = max(1, min(9999, l.page))
+        l.executor = max(1, min(9999, l.executor))
+        l.name = l.name.trimmingCharacters(in: .whitespaces)
+        if l.action != .custom { l.command = nil }
+        return l
+    }
+
+    /// Exactly what goes out on the wire, per console.
+    private var preview: some View {
+        let l = clean
+        let sample = Marker(time: Timecode(frameCount: 0, rate: .fps30), label: "Trigger", laneID: l.id, value: 100)
+        let targets = l.targets(in: consoles)
+        let shown = targets.isEmpty ? [ConsoleTarget(name: "Console", host: "")] : targets
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("SENDS").font(.manrope(10.5, .bold)).tracking(1.1).foregroundStyle(Brand.graphite)
+            ForEach(shown) { c in
+                ForEach(Array(l.messages(for: sample, console: c).enumerated()), id: \.offset) { _, msg in
+                    HStack(spacing: 10) {
+                        Text(c.host.isEmpty ? "—" : "\(c.host):\(c.port)")
+                            .foregroundStyle(Brand.graphite)
+                            .frame(width: 140, alignment: .leading)
+                        Text(msg.address).foregroundStyle(Brand.champagne)
+                        Text(msg.arguments.map(Self.describe).joined(separator: " ")).foregroundStyle(Brand.ink)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                }
+            }
+            if l.messages(for: sample, console: shown[0]).isEmpty {
+                Text("Type a command to send.").font(.manrope(12)).foregroundStyle(Brand.warn)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.35)))
+    }
+
+    private static func describe(_ v: OSCValue) -> String {
+        switch v {
+        case .int(let i): return "\(i)"
+        case .float(let f): return String(format: "%.2f", f)
+        case .string(let s): return "\"\(s)\""
+        }
+    }
+
+    private func field<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(label).font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel).frame(width: 84, alignment: .leading)
+            content()
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func numberBox(_ placeholder: String, value: Binding<Int>) -> some View {
+        TextField(placeholder, value: value, format: .number.grouping(.never))
+            .textFieldStyle(.roundedBorder)
+            .font(.manrope(14, .semibold).monospacedDigit())
+            .multilineTextAlignment(.center)
+            .frame(width: 70)
     }
 }

@@ -2,7 +2,7 @@ import SwiftUI
 import QuartzCore
 import PlaybackCore
 
-/// The expanded view of one song: waveform, timecode lane, and markers once there are any.
+/// The expanded view of one song: waveform, timecode lane, and markers and executor lanes once there are any.
 struct SongTimelineView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
@@ -46,10 +46,23 @@ struct SongTimelineView: View {
             .buttonStyle(QuietButtonStyle())
             .help("Loop between the markers either side of the playhead, or the whole song")
             Button { model.addMarker() } label: {
-                HStack(spacing: 8) { Image(systemName: "plus"); Text("Add marker"); KeyCap(key: "M") }
+                HStack(spacing: 8) { Image(systemName: "plus"); Text("Marker"); KeyCap(key: "M") }
             }
             .buttonStyle(QuietButtonStyle())
             .disabled(model.locked)
+            .help("Drop a marker at the playhead")
+            Button { model.addTrigger() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: model.lanes.isEmpty ? "rectangle.stack.badge.plus" : "bolt.fill")
+                        .foregroundStyle(model.selectedLane.map { Brand.lane($0.color) } ?? Brand.ink)
+                    Text(model.lanes.isEmpty ? "Trigger lane" : "Trigger")
+                    KeyCap(key: "C")
+                }
+            }
+            .buttonStyle(QuietButtonStyle())
+            .disabled(model.locked)
+            .help(model.lanes.isEmpty ? "Add a lane that fires an MA3 executor over OSC"
+                                      : "Drop a trigger at the playhead on \(model.selectedLane?.title ?? "the chosen lane")")
             Button("Done") { model.go(.library) }
                 .buttonStyle(QuietButtonStyle())
         }
@@ -145,22 +158,36 @@ struct SongTimelineView: View {
 struct TimelinePanel: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
+    @EnvironmentObject private var control: ControlCenter
     let song: Song
     @State private var reveal: CGFloat = 0
+    /// A trigger being dragged along its lane, and how far.
+    @State private var dragging: (id: UUID, dx: CGFloat)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let labelWidth: CGFloat = 92
+    private var lanes: [TriggerLane] { model.lanes }
+    private var plainMarkers: [Marker] { song.markers.filter { $0.laneID == nil } }
+    /// Lane names need more room than "MASTER".
+    private var labelWidth: CGFloat { lanes.isEmpty ? 92 : 156 }
 
     var body: some View {
         let length = max(song.length ?? 0, 0.001)
+        let plain = plainMarkers
         VStack(alignment: .leading, spacing: 10) {
             GeometryReader { geo in
                 let trackWidth = geo.size.width - labelWidth - 12
-                // Lanes: ruler 22, waveform (fills what's left), timecode 26, markers 44, gaps 10.
-                let markerSpace: CGFloat = song.markers.isEmpty ? 0 : 54
-                let waveHeight = max(90, geo.size.height - 22 - 10 - 10 - 26 - markerSpace - 4)
-                let lanesHeight = 22 + 10 + waveHeight + 10 + 26 + markerSpace
+                // Rows: ruler 22, waveform (fills what's left), timecode 26, markers 44, then one
+                // row per executor lane and an "Add lane" row. Gaps 10 (6 between lanes).
+                let n = CGFloat(lanes.count)
+                let markerSpace: CGFloat = plain.isEmpty ? 0 : 54
+                let base: CGFloat = 22 + 10 + 10 + 26 + markerSpace + 4
+                let laneChrome: CGFloat = lanes.isEmpty ? 0 : 10 + 6 * max(0, n - 1) + 6 + 26
+                let laneHeight: CGFloat = lanes.isEmpty ? 0 : min(34, max(22, (geo.size.height - base - laneChrome - 80) / max(n, 1)))
+                let laneSpace = lanes.isEmpty ? 0 : laneChrome + n * laneHeight
+                let waveHeight = max(80, geo.size.height - base - laneSpace)
+                let lanesHeight = 22 + 10 + waveHeight + 10 + 26 + markerSpace + laneSpace
                 let scrubLimit = 22 + 10 + waveHeight + 10 + 26
+                let linesBottom = lanesHeight - (lanes.isEmpty ? 0 : 32)
                 SongProgress { position, _ in
                     let p = CGFloat(min(1, max(0, position / length)))
                     let playheadX = trackWidth * p
@@ -173,9 +200,19 @@ struct TimelinePanel: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         lane("Timecode") { timecodeLane }
-                        if !song.markers.isEmpty {
-                            lane("Markers") { markerLane(width: trackWidth, length: length) }
+                        if !plain.isEmpty {
+                            lane("Markers") { markerLane(plain, width: trackWidth, length: length) }
                                 .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        if !lanes.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(lanes) { l in
+                                    triggerLane(l, height: laneHeight, width: trackWidth, length: length)
+                                        .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
+                                addLaneRow
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                     .mask(alignment: .leading) {
@@ -193,28 +230,30 @@ struct TimelinePanel: View {
                             let x1 = trackWidth * CGFloat(min(length, loop.upperBound) / length)
                             Rectangle().fill(Brand.gold.opacity(0.08))
                                 .overlay(alignment: .top) { Rectangle().fill(Brand.gold.opacity(0.6)).frame(height: 2) }
-                                .frame(width: max(2, x1 - x0), height: lanesHeight - 24)
+                                .frame(width: max(2, x1 - x0), height: linesBottom - 24)
                                 .offset(x: labelWidth + 12 + x0, y: 24)
                                 .allowsHitTesting(false)
                         }
-                        markerLines(width: trackWidth, length: length, height: lanesHeight - 30)
+                        markerLines(width: trackWidth, length: length, height: linesBottom - 30)
                             .offset(x: labelWidth + 12)
-                        playhead(position: position, height: lanesHeight - 18)
+                        playhead(position: position, height: linesBottom - 18)
                             .offset(x: labelWidth + 12 + playheadX - 1)
                     }
                     .contentShape(Rectangle())
                     .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { value in
-                        // Scrub on the waveform and timecode lanes; the marker lane keeps its clicks.
+                        // Scrub on the waveform and timecode lanes; the marker and executor lanes keep their clicks.
                         let x = value.location.x - labelWidth - 12
                         guard x >= 0, trackWidth > 0, value.startLocation.y < scrubLimit else { return }
                         transport.locate(Double(x / trackWidth) * length)
                     })
                 }
             }
-            if song.markers.isEmpty {
+            if plain.isEmpty && lanes.isEmpty {
                 HStack(spacing: 8) {
                     KeyCap(key: "M")
-                    Text("drops a marker at the playhead. Songs without markers stay plain playback.")
+                    Text("drops a marker at the playhead.")
+                    KeyCap(key: "C").padding(.leading, 10)
+                    Text("starts a trigger lane that fires an MA3 executor. Songs without either stay plain playback.")
                 }
                 .font(.manrope(12.5))
                 .foregroundStyle(Brand.graphite)
@@ -226,6 +265,7 @@ struct TimelinePanel: View {
         .padding(.bottom, 16)
         .frame(maxHeight: .infinity, alignment: .top)
         .solidPanel()
+        .animation(.vivid(0.4), value: lanes)
         .onAppear {
             model.loadWaveform(for: song)
             if reduceMotion { reveal = 1 } else { withAnimation(.vivid(0.7).delay(0.12)) { reveal = 1 } }
@@ -285,11 +325,15 @@ struct TimelinePanel: View {
         )
     }
 
-    private func markerLane(width: CGFloat, length: Double) -> some View {
+    private func xPos(of marker: Marker, width: CGFloat, length: Double) -> CGFloat {
+        width * CGFloat(Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond / length)
+    }
+
+    private func markerLane(_ markers: [Marker], width: CGFloat, length: Double) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 8).fill(Brand.gold.opacity(0.05))
-            ForEach(song.markers) { marker in
-                let x = width * CGFloat(Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond / length)
+            ForEach(markers) { marker in
+                let x = xPos(of: marker, width: width, length: length)
                 let flip = x > width * 0.85
                 HStack(spacing: 7) {
                     if flip { markerChip(marker) }
@@ -323,11 +367,199 @@ struct TimelinePanel: View {
             .help("Click to go here. Right-click to rename or delete.")
     }
 
+    // MARK: Executor lanes
+
+    private func isSelected(_ lane: TriggerLane) -> Bool { model.selectedLane?.id == lane.id }
+
+    /// "MA3 FOH", "All consoles", or what's missing.
+    private func targetText(_ lane: TriggerLane) -> (String, Bool) {
+        let consoles = control.settings.consoles
+        let targets = lane.targets(in: consoles)
+        if consoles.isEmpty { return ("No console set up", false) }
+        if targets.isEmpty { return (lane.consoleIDs.isEmpty ? "No console switched on" : "Its console is off", false) }
+        if lane.consoleIDs.isEmpty && consoles.count > 1 { return ("All consoles", true) }
+        return (targets.map(\.name).joined(separator: ", "), true)
+    }
+
+    private func triggerLane(_ lane: TriggerLane, height: CGFloat, width: CGFloat, length: Double) -> some View {
+        let color = Brand.lane(lane.color)
+        let selected = isSelected(lane)
+        let triggers = song.markers.filter { $0.laneID == lane.id }
+        return HStack(spacing: 12) {
+            laneLabel(lane, color: color, selected: selected, height: height)
+                .frame(width: labelWidth, height: height)
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(color.opacity(selected ? 0.10 : 0.045))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(color.opacity(selected ? 0.5 : 0), lineWidth: 1))
+                ForEach(triggers) { m in
+                    triggerTick(m, lane: lane, color: color, height: height, width: width, length: length)
+                }
+            }
+            .frame(width: width, height: height)
+            .opacity(lane.muted ? 0.4 : 1)
+            .contentShape(Rectangle())
+            .gesture(SpatialTapGesture(count: 2).onEnded { value in
+                model.addTrigger(on: lane, at: Double(value.location.x / max(width, 1)) * length)
+            })
+            .simultaneousGesture(TapGesture().onEnded { model.selectedLaneID = lane.id })
+            .help("Double-click to drop a trigger here. Press C to drop one at the playhead.")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(lane.title) lane, \(triggers.count) triggers")
+    }
+
+    private func laneLabel(_ lane: TriggerLane, color: Color, selected: Bool, height: CGFloat) -> some View {
+        let (target, reachable) = targetText(lane)
+        let hasName = !lane.name.trimmingCharacters(in: .whitespaces).isEmpty
+        let detail = hasName ? "\(lane.page).\(lane.executor) · \(lane.action == .custom ? "Custom" : lane.action.label) · \(target)" : target
+        return Button { model.selectedLaneID = lane.id } label: {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 1.5).fill(color).frame(width: 3, height: max(10, height - 12))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(lane.title)
+                        .font(.manrope(11.5, .semibold))
+                        .foregroundStyle(lane.muted ? Brand.graphite : Brand.ink)
+                        .lineLimit(1)
+                    if height >= 28 {
+                        Text(detail)
+                            .font(.manrope(10, .medium))
+                            .foregroundStyle(reachable ? Brand.graphite : Brand.warn)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if lane.muted {
+                    Image(systemName: "speaker.slash.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(Brand.graphite)
+                } else if !reachable {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9)).foregroundStyle(Brand.warn)
+                }
+            }
+            .padding(.leading, 6)
+            .padding(.trailing, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.white.opacity(selected ? 0.07 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if !model.locked { model.laneEdit = lane } })
+        .contextMenu {
+            Button("Edit Lane…") { model.laneEdit = lane }.disabled(model.locked)
+            Button("Fire Now") { model.fireLane(lane) }
+            Divider()
+            Button(lane.muted ? "Unmute" : "Mute") { model.toggleMute(lane) }.disabled(model.locked)
+            Button("Delete Lane") { model.deleteLane(lane) }.disabled(model.locked)
+        }
+        .help("\(lane.commandLine() ?? "Fader \(lane.page).\(lane.executor)") → \(target). Click to choose this lane for C; double-click to edit.")
+    }
+
+    private func triggerText(_ m: Marker, lane: TriggerLane) -> String {
+        guard lane.action == .fader, let v = m.value else { return m.label }
+        return m.label == "Level" ? "\(Int(v))%" : "\(m.label) · \(Int(v))%"
+    }
+
+    private func triggerTick(_ m: Marker, lane: TriggerLane, color: Color, height: CGFloat, width: CGFloat, length: Double) -> some View {
+        let fired = control.firedAt[m.id].map { Date().timeIntervalSince($0) < 0.35 } ?? false
+        let dx = dragging?.id == m.id ? dragging?.dx ?? 0 : 0
+        let x = min(width, max(0, xPos(of: m, width: width, length: length) + dx))
+        let flip = x > width * 0.88
+        let chip = Text(triggerText(m, lane: lane))
+            .font(.manrope(10.5, .semibold))
+            .foregroundStyle(fired ? Color(hex: 0x120D05) : Brand.ink)
+            .lineLimit(1)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(fired ? Brand.gold : Brand.phantom))
+        return HStack(spacing: 5) {
+            if flip && height >= 24 { chip }
+            Capsule().fill(fired ? Brand.gold : color).frame(width: fired ? 3 : 2, height: max(8, height - 8))
+            if !flip && height >= 24 { chip }
+        }
+        .fixedSize()
+        .shadow(color: fired ? Brand.gold.opacity(0.6) : .clear, radius: 6)
+        .alignmentGuide(.leading) { d in flip ? d.width : 0 }
+        .offset(x: x - (flip ? 0 : 1), y: 4)
+        .animation(.easeOut(duration: 0.25), value: fired)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.selectedLaneID = lane.id
+            transport.locate(model.seconds(of: m, in: song))
+        }
+        .gesture(DragGesture(minimumDistance: 3)
+            .onChanged { v in if !model.locked { dragging = (m.id, v.translation.width) } }
+            .onEnded { v in
+                dragging = nil
+                guard !model.locked, width > 0 else { return }
+                model.move(m, in: song, to: model.seconds(of: m, in: song) + Double(v.translation.width / width) * length)
+            })
+        .contextMenu {
+            Button("Go to Trigger") { transport.locate(model.seconds(of: m, in: song)) }
+            Button("Fire Now") { model.fire(m) }
+            Divider()
+            Button("Rename…") { model.markerEdit = MarkerEdit(marker: m, song: song) }.disabled(model.locked)
+            if lane.action == .fader || lane.action == .custom {
+                Menu(lane.action == .fader ? "Level" : "Value") {
+                    ForEach([100.0, 75, 50, 25, 0], id: \.self) { v in
+                        Button(lane.action == .fader ? "\(Int(v))%" : "\(Int(v))") { model.setLevel(m, in: song, to: v) }
+                    }
+                    Divider()
+                    Button("Other…") { model.markerEdit = MarkerEdit(marker: m, song: song) }
+                }
+                .disabled(model.locked)
+            }
+            Button("Move to Playhead") { model.moveToPlayhead(m, in: song) }.disabled(model.locked)
+            Button("One Frame Earlier") { model.nudge(m, in: song, frames: -1) }.disabled(model.locked)
+            Button("One Frame Later") { model.nudge(m, in: song, frames: 1) }.disabled(model.locked)
+            Divider()
+            Button("Delete") { model.deleteMarker(m, in: song) }.disabled(model.locked)
+        }
+        .help("\(m.time.description) · \(lane.commandLine(for: m) ?? triggerText(m, lane: lane)). Drag to move, right-click for more.")
+        .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .bottom)))
+    }
+
+    private var addLaneRow: some View {
+        HStack(spacing: 12) {
+            Button { model.newLane() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus").font(.system(size: 10, weight: .bold))
+                    Text("Add lane").font(.manrope(11.5, .semibold))
+                }
+                .foregroundStyle(Brand.space)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(.white.opacity(0.05)))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(model.locked)
+            .frame(width: labelWidth, alignment: .leading)
+            if let lane = model.selectedLane {
+                HStack(spacing: 6) {
+                    KeyCap(key: "C")
+                    Text("drops a trigger on")
+                    Text(lane.title).foregroundStyle(Brand.lane(lane.color))
+                    Text("at the playhead. Double-click a lane to place one; drag to move.")
+                }
+                .font(.manrope(11.5))
+                .foregroundStyle(Brand.graphite)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: 26)
+    }
+
     private func markerLines(width: CGFloat, length: Double, height: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
+        let selected = model.selectedLane
+        return ZStack(alignment: .topLeading) {
             ForEach(song.markers) { marker in
-                let x = width * CGFloat(Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond / length)
-                Rectangle().fill(Brand.gold.opacity(0.28)).frame(width: 1, height: max(0, height)).offset(x: x, y: 30)
+                if marker.laneID == nil {
+                    Rectangle().fill(Brand.gold.opacity(0.28)).frame(width: 1, height: max(0, height))
+                        .offset(x: xPos(of: marker, width: width, length: length), y: 30)
+                } else if let lane = selected, marker.laneID == lane.id {
+                    // The chosen lane's triggers, faintly through the waveform, to line them up with the music.
+                    Rectangle().fill(Brand.lane(lane.color).opacity(0.22)).frame(width: 1, height: max(0, height))
+                        .offset(x: xPos(of: marker, width: width, length: length), y: 30)
+                }
             }
         }
         .allowsHitTesting(false)

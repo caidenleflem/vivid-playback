@@ -94,10 +94,16 @@ struct MarkerEdit: Identifiable {
 @MainActor
 final class AppModel: ObservableObject {
     @Published var screen: Screen = .firstRun
-    @Published var show: Show?
+    @Published var show: Show? { didSet { syncTriggers() } }
     @Published var packageURL: URL?
     @Published var issues: [ShowIssue] = []
-    @Published var currentSongID: UUID?
+    @Published var currentSongID: UUID? { didSet { syncTriggers() } }
+    /// The executor lane C adds triggers to.
+    @Published var selectedLaneID: UUID?
+    /// The lane being edited (a new one has no saved copy yet).
+    @Published var laneEdit: TriggerLane?
+    /// A text field in the window has focus (single-key shortcuts stand aside).
+    @Published var typingInField = false
     @Published var showsShowTimecode = true
     @Published var importState: ImportState = .idle
     @Published var waveforms: [UUID: [Float]] = [:]
@@ -143,6 +149,7 @@ final class AppModel: ObservableObject {
             return (self.queue, self.currentSong?.id, self.transport.position(), self.transport.isPlaying)
         }
         control.followRate = { [weak self] in self?.show?.defaultRate ?? .fps30 }
+        control.onTriggerSettingsChange = { [weak self] in self?.syncTriggers() }
         refreshDevices()
         AudioDevices.observeChanges { [weak self] in
             Task { @MainActor in
@@ -164,7 +171,7 @@ final class AppModel: ObservableObject {
     func refreshDevices() { devices = AudioDevices.all() }
 
     /// While a sheet is open, single-key shortcuts (Space, M, L, arrows) stay out of the way of typing.
-    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown }
+    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown || laneEdit != nil || typingInField }
 
     static var showsFolder: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Vivid Playback")
@@ -398,7 +405,7 @@ final class AppModel: ObservableObject {
         withAnimation(.vivid(0.45)) {
             edit { show in
                 guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
-                show.songs[i].markers.append(Marker(time: tc, label: "Marker \(show.songs[i].markers.count + 1)"))
+                show.songs[i].markers.append(Marker(time: tc, label: "Marker \(show.songs[i].markers.filter { $0.laneID == nil }.count + 1)"))
                 show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
             }
         }
@@ -433,7 +440,7 @@ final class AppModel: ObservableObject {
         guard let song = currentSong else { return }
         if transport.loop != nil { transport.setLoop(nil); return }
         let p = transport.position()
-        let points = song.markers.map { seconds(of: $0, in: song) }.sorted()
+        let points = song.markers.filter { $0.laneID == nil }.map { seconds(of: $0, in: song) }.sorted()
         let start = points.last(where: { $0 <= p }) ?? 0
         let end = points.first(where: { $0 > p }) ?? (song.length ?? transport.length)
         guard end - start > 0.25 else { return }
@@ -516,6 +523,100 @@ final class AppModel: ObservableObject {
         }
         if Timecode(text, rate: show.defaultRate) == nil { return "That isn't a timecode. Use HH:MM:SS:FF." }
         return "No song in this setlist plays at \(text)."
+    }
+
+    // MARK: Executor lanes and triggers
+
+    var lanes: [TriggerLane] { show?.triggerLanes ?? [] }
+    var selectedLane: TriggerLane? { lanes.first { $0.id == selectedLaneID } ?? lanes.first }
+
+    /// Hands the current song's triggers to the firing queue.
+    func syncTriggers() {
+        control.triggers.update(song: currentSong, lanes: lanes, consoles: control.settings.consoles,
+                                fireEarlyMs: control.settings.fireEarlyMs)
+    }
+
+    func newLane() {
+        let next = (lanes.map(\.executor).max() ?? 200) + 1
+        laneEdit = TriggerLane(page: lanes.last?.page ?? 1, executor: next, color: lanes.count % 6)
+    }
+
+    func saveLane(_ lane: TriggerLane) {
+        edit { show in
+            var list = show.triggerLanes ?? []
+            if let i = list.firstIndex(where: { $0.id == lane.id }) { list[i] = lane } else { list.append(lane) }
+            show.triggerLanes = list
+        }
+        selectedLaneID = lane.id
+    }
+
+    func deleteLane(_ lane: TriggerLane) {
+        edit { show in
+            show.triggerLanes?.removeAll { $0.id == lane.id }
+            for i in show.songs.indices { show.songs[i].markers.removeAll { $0.laneID == lane.id } }
+        }
+        if selectedLaneID == lane.id { selectedLaneID = lanes.first?.id }
+    }
+
+    func toggleMute(_ lane: TriggerLane) {
+        var l = lane
+        l.muted.toggle()
+        saveLane(l)
+    }
+
+    /// C in the timeline: a trigger at the playhead on the selected lane (or, with `at`, on
+    /// `lane` at that point in the song: double-clicking a lane).
+    func addTrigger(on target: TriggerLane? = nil, at seconds: Double? = nil) {
+        guard screen == .timeline, !locked, let song = currentSong else { return }
+        guard let lane = target ?? selectedLane else { newLane(); return }
+        selectedLaneID = lane.id
+        let tc = timecode(for: song, at: max(0, seconds ?? transport.position()))
+        let count = song.markers.filter { $0.laneID == lane.id }.count + 1
+        let marker = Marker(time: tc, label: lane.action == .fader ? "Level" : "\(lane.action.label) \(count)",
+                            laneID: lane.id, value: lane.action == .fader ? 100 : nil)
+        withAnimation(.vivid(0.35)) {
+            edit { show in
+                guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+                show.songs[i].markers.append(marker)
+                show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
+            }
+        }
+    }
+
+    func updateMarker(_ marker: Marker, in song: Song, _ change: (inout Marker) -> Void) {
+        edit { show in
+            guard let s = show.songs.firstIndex(where: { $0.id == song.id }),
+                  let m = show.songs[s].markers.firstIndex(where: { $0.id == marker.id }) else { return }
+            change(&show.songs[s].markers[m])
+            show.songs[s].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
+        }
+    }
+
+    func setLevel(_ marker: Marker, in song: Song, to level: Double) {
+        updateMarker(marker, in: song) { $0.value = max(0, min(100, level.rounded())) }
+    }
+
+    func move(_ marker: Marker, in song: Song, to seconds: Double) {
+        let tc = timecode(for: song, at: max(0, min(seconds, song.length ?? seconds)))
+        updateMarker(marker, in: song) { $0.time = tc }
+    }
+
+    func nudge(_ marker: Marker, in song: Song, frames: Int) {
+        updateMarker(marker, in: song) { $0.time = $0.time.adding(frames: frames) }
+    }
+
+    func moveToPlayhead(_ marker: Marker, in song: Song) {
+        let tc = timecode(for: song, at: transport.position())
+        updateMarker(marker, in: song) { $0.time = tc }
+    }
+
+    func fire(_ marker: Marker) {
+        guard let lane = lanes.first(where: { $0.id == marker.laneID }) else { return }
+        control.triggers.fire(lane: lane, marker: marker)
+    }
+
+    func fireLane(_ lane: TriggerLane) {
+        control.triggers.fire(lane: lane, marker: nil)
     }
 
     // MARK: Remote control and following timecode
@@ -967,6 +1068,31 @@ final class AppModel: ObservableObject {
                 show.songs[2].markers = [(0.4, "Hit 1"), (5, "Verse 1"), (11, "Chorus · big look"), (17, "Bridge · blackout")].map {
                     Marker(time: song.start.adding(frames: Int($0.0 * song.rate.framesPerSecond)), label: $0.1)
                 }
+            }
+            if target == .timeline, show.songs.count > 2 {
+                let song = show.songs[2]
+                let fps = song.rate.framesPerSecond
+                let main = TriggerLane(name: "Main cues", page: 1, executor: 201, color: 0)
+                let strobes = TriggerLane(name: "Strobes", page: 1, executor: 202, action: .fader, color: 2)
+                let video = TriggerLane(name: "Video", page: 2, executor: 101, color: 4)
+                show.triggerLanes = [main, strobes, video]
+                func at(_ t: Double, _ lane: TriggerLane, _ label: String, _ value: Double? = nil) -> Marker {
+                    Marker(time: song.start.adding(frames: Int(t * fps)), label: label, laneID: lane.id, value: value)
+                }
+                show.songs[2].markers += [
+                    at(0.4, main, "Go+ 1"), at(5, main, "Go+ 2"), at(11, main, "Go+ 3"), at(17, main, "Go+ 4"),
+                    at(10.6, strobes, "Full", 100), at(12.4, strobes, "Out", 0),
+                    at(2, video, "Go+ 1"), at(14, video, "Go+ 2"),
+                ]
+                show.songs[2].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
+                if control.settings.consoles.isEmpty {
+                    control.settings.consoles = [ConsoleTarget(name: "MA3 FOH", host: "10.0.0.20"),
+                                                 ConsoleTarget(name: "MA3 Backup", host: "10.0.0.21", enabled: false)]
+                }
+            }
+            if target == .connections, control.settings.consoles.isEmpty {
+                control.settings.consoles = [ConsoleTarget(name: "MA3 FOH", host: "10.0.0.20"),
+                                             ConsoleTarget(name: "MA3 Backup", host: "10.0.0.21", enabled: false)]
             }
             load(show, package: folder.appendingPathComponent("Example.vividshow"), issues: report.issues)
             if let third = queue.dropFirst(2).first { cue(third, play: false) }

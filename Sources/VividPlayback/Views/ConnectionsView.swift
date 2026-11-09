@@ -107,6 +107,22 @@ struct PillPicker<T: Hashable>: View {
     }
 }
 
+/// Keeps single-key shortcuts (Space, L, arrows) out of the way while a field has focus.
+struct TypingField: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+    @FocusState private var focused: Bool
+    func body(content: Content) -> some View {
+        content
+            .focused($focused)
+            .onChange(of: focused) { model.typingInField = $0 }
+            .onDisappear { if focused { model.typingInField = false } }
+    }
+}
+
+extension View {
+    func typingField() -> some View { modifier(TypingField()) }
+}
+
 // MARK: The page
 
 struct ConnectionsView: View {
@@ -123,6 +139,7 @@ struct ConnectionsView: View {
                 VStack(alignment: .leading, spacing: 34) {
                     header
                     timecodeOut
+                    consolesSection
                     follow
                     remote
                 }
@@ -277,6 +294,7 @@ struct ConnectionsView: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                     TextField("Console IP", text: $customTarget)
+                        .typingField()
                         .textFieldStyle(.roundedBorder)
                         .font(.manrope(12.5).monospacedDigit())
                         .frame(width: 130)
@@ -289,6 +307,162 @@ struct ConnectionsView: View {
             }
         }
         .onAppear { customTarget = target.hasSuffix(".255") ? "" : target }
+    }
+
+    // MARK: Consoles (executor triggers)
+
+    private func console(_ id: UUID) -> Binding<ConsoleTarget> {
+        Binding(get: { control.settings.consoles.first { $0.id == id } ?? ConsoleTarget(id: id) },
+                set: { new in
+                    if let i = control.settings.consoles.firstIndex(where: { $0.id == id }) { control.settings.consoles[i] = new }
+                })
+    }
+
+    private var consolesSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .bottom) {
+                SectionHeader(title: "Consoles",
+                              detail: "Trigger lanes in the timeline fire executors on these over OSC, on time with the music.")
+                Spacer()
+                if let last = control.lastTrigger, Date().timeIntervalSince(last.at) < 120 {
+                    HStack(spacing: 8) {
+                        StatusDot(color: last.ok ? Brand.ok : Brand.warn)
+                        Text(last.text).lineLimit(1)
+                    }
+                    .font(.manrope(12, .medium))
+                    .foregroundStyle(Brand.steel)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Capsule().fill(.white.opacity(0.06)))
+                    .help(last.ok ? "Sent." : "Couldn't send. Check the address, the network, and Local Network access in System Settings › Privacy & Security.")
+                }
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], spacing: 16) {
+                ForEach(control.settings.consoles) { c in consoleCard(c.id) }
+                addConsoleCard
+            }
+            ConnectionCard {
+                HStack(alignment: .top, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("On the grandMA3").font(.manrope(14, .semibold)).foregroundStyle(Brand.ink)
+                        VStack(alignment: .leading, spacing: 6) {
+                            step(1, "Menu › In & Out › OSC.")
+                            step(2, "Add a line: this Mac's address, port 8000, prefix gma3.")
+                            step(3, "Turn on Receive and Receive Command, and enable OSC.")
+                            step(4, "Back here, Edit Lane › Fire now. The executor should go.")
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Fire early").font(.manrope(14, .semibold)).foregroundStyle(Brand.ink)
+                            Spacer()
+                            Text("\(Int(control.settings.fireEarlyMs)) ms").font(.manrope(13, .semibold).monospacedDigit()).foregroundStyle(Brand.gold)
+                        }
+                        Slider(value: $control.settings.fireEarlyMs, in: 0...200, step: 5).tint(Brand.gold)
+                        Text("Sends every trigger this much ahead of the music, to cover the network and the console's own delay.")
+                            .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(width: 320)
+                }
+            }
+        }
+    }
+
+    private func step(_ n: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("\(n)").font(.manrope(11, .bold).monospacedDigit()).foregroundStyle(Brand.gold)
+                .frame(width: 18, height: 18).background(Circle().fill(Brand.gold.opacity(0.12)))
+            Text(text).font(.manrope(12.5)).foregroundStyle(Brand.steel)
+        }
+    }
+
+    private func consoleCard(_ id: UUID) -> some View {
+        let c = console(id)
+        let on = c.wrappedValue.enabled && !c.wrappedValue.host.isEmpty
+        let lanesUsing = model.lanes.filter { $0.consoleIDs.isEmpty || $0.consoleIDs.contains(id) }.count
+        return ConnectionCard(active: on) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    IconWell(symbol: "slider.vertical.3", active: on)
+                    VStack(alignment: .leading, spacing: 3) {
+                        TextField("Console name", text: c.name)
+                        .typingField()
+                            .textFieldStyle(.plain)
+                            .font(.manrope(17, .semibold))
+                            .foregroundStyle(Brand.ink)
+                        Text(c.wrappedValue.host.isEmpty ? "Needs an address" : (lanesUsing == 0 ? "No lanes send here" : "\(lanesUsing) lane\(lanesUsing == 1 ? "" : "s") send here"))
+                            .font(.manrope(12.5)).foregroundStyle(c.wrappedValue.host.isEmpty ? Brand.warn : Brand.space)
+                    }
+                    Spacer()
+                    Toggle("", isOn: c.enabled).toggleStyle(.switch).tint(Brand.gold).labelsHidden()
+                }
+                HStack(spacing: 10) {
+                    labelled("IP address") {
+                        TextField("10.0.0.20", text: c.host)
+                        .typingField()
+                            .textFieldStyle(.roundedBorder).font(.manrope(13).monospacedDigit())
+                    }
+                    labelled("Port") {
+                        TextField("8000", value: c.port, format: IntegerFormatStyle<UInt16>().grouping(.never))
+                        .typingField()
+                            .textFieldStyle(.roundedBorder).font(.manrope(13).monospacedDigit()).frame(width: 64)
+                    }
+                    labelled("Prefix") {
+                        TextField("gma3", text: c.prefix)
+                        .typingField()
+                            .textFieldStyle(.roundedBorder).font(.manrope(13)).frame(width: 70)
+                    }
+                }
+                HStack(spacing: 6) {
+                    Text("Sends").font(.manrope(11.5, .semibold)).foregroundStyle(Brand.graphite)
+                    Text("\(c.wrappedValue.prefix.isEmpty ? "" : "/" + c.wrappedValue.prefix.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")))/cmd \"Go+ Exec 1.201\"")
+                        .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Brand.champagne).lineLimit(1)
+                    Spacer()
+                    Button {
+                        control.settings.consoles.removeAll { $0.id == id }
+                    } label: {
+                        Image(systemName: "trash").font(.system(size: 12, weight: .medium)).foregroundStyle(Brand.graphite)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove this console")
+                }
+            }
+        }
+        .contextMenu {
+            Button("Remove Console") { control.settings.consoles.removeAll { $0.id == id } }
+        }
+    }
+
+    private func labelled<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased()).font(.manrope(10, .bold)).tracking(0.9).foregroundStyle(Brand.graphite)
+            content()
+        }
+    }
+
+    private var addConsoleCard: some View {
+        Button {
+            let n = control.settings.consoles.count
+            withAnimation(.vivid(0.35)) {
+                control.settings.consoles.append(ConsoleTarget(name: n == 0 ? "grandMA3" : "grandMA3 \(n + 1)"))
+            }
+        } label: {
+            VStack(spacing: 10) {
+                Image(systemName: "plus").font(.system(size: 18, weight: .semibold)).foregroundStyle(Brand.gold)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Brand.gold.opacity(0.12)))
+                Text("Add a console").font(.manrope(14, .semibold)).foregroundStyle(Brand.ink)
+                Text("grandMA3 over OSC").font(.manrope(12)).foregroundStyle(Brand.space)
+            }
+            .frame(maxWidth: .infinity, minHeight: 186)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                    .foregroundStyle(.white.opacity(0.14))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Follow
@@ -384,6 +558,7 @@ struct ConnectionsView: View {
                     }
                     Text("port").font(.manrope(12, .semibold)).foregroundStyle(Brand.space)
                     TextField("8000", text: $portText)
+                        .typingField()
                         .textFieldStyle(.roundedBorder).font(.manrope(12.5).monospacedDigit()).frame(width: 64)
                         .onSubmit { if let p = UInt16(portText), p > 1023 { control.settings.oscPort = p } }
                 }

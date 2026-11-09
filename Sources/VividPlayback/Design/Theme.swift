@@ -18,6 +18,14 @@ enum Brand {
     static let arsenic = Color(hex: 0x40424D)
     static let ok = Color(hex: 0x5BC48A)
     static let warn = Color(hex: 0xE2A852)
+
+    /// Executor lane colours: quiet, distinct on near-black, and none of them gold (gold is
+    /// the playhead and a trigger firing).
+    static let laneColors: [Color] = [
+        Color(hex: 0x86A8D8), Color(hex: 0x7CC2A0), Color(hex: 0xD99484),
+        Color(hex: 0xAE9BDA), Color(hex: 0xD4C184), Color(hex: 0x7EC5C9),
+    ]
+    static func lane(_ index: Int) -> Color { laneColors[((index % laneColors.count) + laneColors.count) % laneColors.count] }
 }
 
 extension Color {

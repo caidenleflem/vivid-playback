@@ -36,6 +36,25 @@ final class OutputClock: @unchecked Sendable {
         lock.lock(); testStart = start; lock.unlock()
     }
 
+    /// Where the playhead is in the current song (seconds from its start), as heard.
+    func position(at time: Double = CACurrentMediaTime()) -> (song: Song?, seconds: Double, running: Bool) {
+        lock.lock()
+        let song = self.song, buffers = self.buffers, rate = sampleRate, latency = self.latency
+        let usesAudio = self.usesAudio, clockRunning = self.clockRunning, anchor = anchorPosition, anchorTime = self.anchorTime
+        lock.unlock()
+        guard let song else { return (nil, 0, false) }
+        if usesAudio, buffers != nil {
+            var frames = Double(state.pendingLocate >= 0 ? state.pendingLocate : state.renderedPosition)
+            let running = state.playing
+            if running {
+                frames += min(0.1, max(0, time - state.renderedAt)) * rate
+                frames -= latency * rate
+            }
+            return (song, frames / rate - song.fileOffset, running)
+        }
+        return (song, clockRunning ? anchor + (time - anchorTime) : anchor, clockRunning)
+    }
+
     /// The timecode at this moment, and whether it's running. Nil where nothing is sent.
     func now(at time: Double = CACurrentMediaTime()) -> (timecode: Timecode?, running: Bool) {
         lock.lock()

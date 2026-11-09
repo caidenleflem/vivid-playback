@@ -41,7 +41,7 @@ folder: `./scripts/make-dmg.sh`. The installer lands in `build/`.
   the LTC in the file.
 
 Keys: **Space** play or pause · **← →** previous and next song · **⌘←** top of the song ·
-**Return** or **⌘T** song timeline · **M** add a marker · **L** loop between markers ·
+**Return** or **⌘T** song timeline · **M** add a marker · **C** add a trigger · **L** loop between markers ·
 **⌘G** go to timecode · **⇧⌘F** full-screen clock · **Esc** back to the library ·
 **⌥⌘O** audio output · **⇧⌘E** edit setlist · **⇧⌘L** show mode · **⇧⌘I** things to check.
 
@@ -49,6 +49,20 @@ Keys: **Space** play or pause · **← →** previous and next song · **⌘←*
 clock shows the timecode read from it (what the console receives). Only a song with no
 timecode file gets timecode generated from the sheet, and the chip says which. If a timecode
 file can't be read, no timecode is sent and a red chip says so; it never substitutes.
+
+**Triggering grandMA3 executors:** in the song timeline press **C** (or Trigger lane) to add a
+lane for an executor. Choose its page and executor, what it does (Go+, Go−, Top, On, Off, a
+fader level, or any command line) and which consoles it fires. Each lane is a row under the
+waveform. Click a lane, then **C** drops a trigger at the playhead; double-click a lane to drop
+one anywhere, drag a trigger to move it, right-click for level, nudge, fire now or delete.
+Triggers fire over OSC on time with the music you hear (the same clock as the timecode), and
+flash gold as they go. Lanes belong to the show; each song has its own triggers.
+
+Set up the consoles under **Connections › Consoles**: name, IP address, port (8000) and prefix
+(gma3). On the grandMA3: Menu › In & Out › OSC, add a line on port 8000 with prefix gma3, and
+turn on Receive and Receive Command. **Fire early** sends every trigger up to 200 ms ahead to
+cover the console's own delay. Commands go to `/gma3/cmd` (for example `"Go+ Exec 1.201"`);
+fader lanes send `/gma3/Page1/Fader201` with a level from 0 to 100.
 
 **Audio output:** pick the interface, the master outputs (a stereo pair, or one output in mono)
 and the timecode output. On a two-output Mac, put the master on Output 1 (mono) and timecode on
@@ -74,7 +88,9 @@ stick; **Show Show File in Finder** opens the folder.
 | Loop between markers, go to timecode, rename and delete markers | Done |
 | Excel (.xlsx) sheets | Done, tested. Numbers files: export as .xlsx or CSV. |
 | Interface unplugged mid-show: playback stops with a clear banner | Done |
-| MIDI timecode, Art-Net timecode, chase, grandMA3 export | Later (see docs/IDEAS-CUEPOINTS.md) |
+| MIDI timecode, Art-Net timecode, following incoming timecode, OSC and MIDI remote | Done (needs a check on your rig) |
+| grandMA3 executor trigger lanes over OSC, console targets, fire early | Done (needs a check on your console) |
+| grandMA3 timecode show export | Later (see docs/IDEAS-CUEPOINTS.md) |
 
 ## Layout
 

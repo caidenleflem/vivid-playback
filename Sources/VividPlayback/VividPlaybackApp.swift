@@ -89,6 +89,11 @@ struct PlaybackCommands: Commands {
             Button("Add Marker") { model.addMarker() }
                 .keyboardShortcut("m", modifiers: [])
                 .disabled(typing || model.locked || model.screen != .timeline)
+            Button("Add Trigger") { model.addTrigger() }
+                .keyboardShortcut("c", modifiers: [])
+                .disabled(typing || model.locked || model.screen != .timeline)
+            Button("New Trigger Lane…") { model.newLane() }
+                .disabled(model.locked || model.show == nil)
             Divider()
             Toggle("Stop After Each Song", isOn: $model.stopAfterEach)
             Toggle("Show Mode (Lock Editing)", isOn: $model.locked)
@@ -194,6 +199,7 @@ struct RootView: View {
         .sheet(isPresented: $model.goToShown) { GoToSheet().environmentObject(model) }
         .sheet(isPresented: $model.showInfoShown) { ShowInfoSheet().environmentObject(model) }
         .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song).environmentObject(model) }
+        .sheet(item: $model.laneEdit) { lane in LaneEditor(lane: lane).environmentObject(model).environmentObject(model.control) }
     }
 }
 
