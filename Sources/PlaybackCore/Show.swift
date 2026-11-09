@@ -30,6 +30,8 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     /// True for songs the sheet lists with no timecode (a looped bed, an interstitial):
     /// they play, but send no timecode. `start` is then only a placeholder.
     public var timecodeOff: Bool?
+    /// The act or section from the sheet ("Act 1", "Encore").
+    public var part: String?
     public var notes: String?
     public var markers: [Marker]
 
@@ -62,6 +64,8 @@ public struct Setlist: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
     public var name: String
     public var songIDs: [UUID]
+    /// Cover image, relative to the show package.
+    public var artwork: String?
     /// Songs kept in the list but skipped tonight.
     public var skipped: Set<UUID>
 
@@ -99,6 +103,8 @@ public struct Show: Codable, Hashable, Sendable {
 
     public var format: Int
     public var name: String
+    /// Who the show is for; shows are grouped by artist on the Albums page.
+    public var artist: String?
     public var defaultRate: FrameRate
     /// The folder the media was imported from; song paths are relative to it. Relinking a show
     /// that moved is a matter of changing this.

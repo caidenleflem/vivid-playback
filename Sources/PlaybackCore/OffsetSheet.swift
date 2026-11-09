@@ -62,7 +62,7 @@ public enum DelimitedText {
 
 /// The things an offset sheet can say about a song.
 public enum SheetField: String, Codable, CaseIterable, Sendable {
-    case number, title, start, end, length, rate, fileOffset, masterFile, timecodeFile, notes
+    case number, title, start, end, length, rate, fileOffset, masterFile, timecodeFile, notes, part
 
     public var displayName: String {
         switch self {
@@ -76,6 +76,7 @@ public enum SheetField: String, Codable, CaseIterable, Sendable {
         case .masterFile: return "Master file"
         case .timecodeFile: return "Timecode file"
         case .notes: return "Notes"
+        case .part: return "Part"
         }
     }
 }
@@ -109,6 +110,8 @@ public struct SheetRow: Equatable, Sendable {
     public var masterFile: String?
     public var timecodeFile: String?
     public var notes: String?
+    /// The act or section ("Act 1", "Encore").
+    public var part: String?
     /// The start cell had something in it that isn't a timecode.
     public var startUnreadable = false
 }
@@ -119,6 +122,23 @@ public struct OffsetSheet: Sendable {
     public var rows: [SheetRow]
     /// Rows that couldn't be read, in plain words ("Row 7: couldn't read the start timecode “1:00”.").
     public var problems: [String]
+
+    /// Text in the rows above the header ("THE KID LAROI · A PERFECT WORLD · FALL EU 26 · SETLIST").
+    public var titleLines: [String] {
+        guard let h = mapping.headerRow else { return [] }
+        return table.prefix(h).compactMap { row in row.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } }
+    }
+
+    /// The artist and the show name from the sheet's title line, when it has one:
+    /// "ARTIST · SHOW · LEG · SETLIST" → ("ARTIST", "SHOW · LEG").
+    public var artistAndShow: (artist: String, show: String)? {
+        guard let line = titleLines.first else { return nil }
+        let parts = line.components(separatedBy: CharacterSet(charactersIn: "·•|–—"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !["setlist", "set list", "songs", "running order"].contains($0.lowercased()) }
+        guard parts.count >= 2 else { return nil }
+        return (parts[0], parts.dropFirst().joined(separator: " · "))
+    }
 
     public var headers: [String] {
         guard let h = mapping.headerRow, h < table.count else { return [] }
@@ -139,6 +159,7 @@ public enum OffsetSheetParser {
         (.rate, ["fps", "framerate", "rate", "fr", "frames"]),
         (.fileOffset, ["fileoffset", "preroll", "audiooffset", "prerollsec", "prerollseconds", "fileoffsetsec", "headroom"]),
         (.notes, ["notes", "note", "comments", "comment", "remarks"]),
+        (.part, ["part", "act", "section", "set", "segment", "block"]),
     ]
 
     static let audioExtensions: Set<String> = ["wav", "wave", "aif", "aiff", "aifc", "mp3", "m4a", "caf", "flac"]
@@ -204,7 +225,9 @@ public enum OffsetSheetParser {
                     for (col, cell) in header.enumerated() where !used.contains(col) && columns[field] == nil {
                         let n = normalize(cell)
                         let isHash = cell.contains("#") && field == .number
-                        let hit = isHash || (exact ? names.contains(n) : (n.count > 2 && names.contains { $0.count > 2 && n.contains($0) }))
+                        // "Part"/"Act"/"Set" only as whole headers: "Offset" contains "set".
+                        let partialOK = field != .part
+                        let hit = isHash || (exact ? names.contains(n) : (partialOK && n.count > 2 && names.contains { $0.count > 2 && n.contains($0) }))
                         guard hit else { continue }
                         let p = profiles[col]
                         // Let the values overrule an ambiguous header.
@@ -288,6 +311,7 @@ public enum OffsetSheetParser {
             var row = SheetRow(rowIndex: index, number: nil, title: title ?? "Untitled", start: nil, end: nil, length: nil,
                                rate: cell(.rate) == nil ? nil : rate, fileOffset: nil,
                                masterFile: cell(.masterFile), timecodeFile: cell(.timecodeFile), notes: cell(.notes))
+            row.part = cell(.part)
             if let n = cell(.number) { row.number = Int(n.filter(\.isNumber)) }
             if let s = startText {
                 row.start = Timecode(s, rate: rate)

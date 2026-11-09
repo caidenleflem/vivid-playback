@@ -141,12 +141,15 @@ public struct ShowImporter: Sendable {
                             masterPath: m?.master.map { ShowStore.relativePath(of: $0, in: folder) },
                             timecodePath: row.start == nil ? nil : m?.timecode.map { ShowStore.relativePath(of: $0, in: folder) },
                             notes: row.notes)
+            song.part = row.part
             if row.start == nil { song.timecodeOff = true }
             songs.append(song)
         }
-        var show = Show(name: name ?? folder.lastPathComponent, defaultRate: rate, mediaFolder: folder.standardizedFileURL.path,
+        let fromSheet = sheet.artistAndShow
+        var show = Show(name: name ?? fromSheet?.show ?? folder.lastPathComponent, defaultRate: rate, mediaFolder: folder.standardizedFileURL.path,
                         songs: songs, sheetMapping: sheet.mapping, sheetFile: ShowStore.relativePath(of: sheetURL, in: folder))
 
+        show.artist = fromSheet?.artist
         let checked = check(&show, progress: progress)
         for (i, song) in show.songs.enumerated() { show.songs[i].timecodeFileChannel = checked.channels[song.id] }
         show.setlists = [Setlist(name: "Full show", songIDs: show.songs.map(\.id))]

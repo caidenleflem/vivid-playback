@@ -95,6 +95,9 @@ struct PlaybackCommands: Commands {
             Button("Audio Output…") { model.outputShown = true }
                 .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(model.show == nil)
+            Button("Show Info…") { model.showInfoShown = true }
+                .keyboardShortcut("i", modifiers: [.command])
+                .disabled(model.locked || model.show == nil)
             Button("Edit Setlist…") { model.setlistEditorShown = true }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(model.locked || model.show == nil)
@@ -107,6 +110,8 @@ struct PlaybackCommands: Commands {
                 .disabled(typing)
             Button("Clock") { model.toggleClock() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
+            Button("Albums") { model.go(.albums) }
+                .keyboardShortcut("1", modifiers: [.command])
             Button("Library") { model.go(.library) }
                 .keyboardShortcut(.escape, modifiers: [])
                 .disabled(typing)
@@ -138,6 +143,8 @@ struct RootView: View {
                 SongTimelineView(morph: morph)
             case .clock:
                 ClockScreen(morph: morph).transition(.opacity)
+            case .albums:
+                AlbumsView().transition(.opacity)
             }
             if let notice = model.notice, model.screen != .firstRun {
                 VStack {
@@ -175,6 +182,7 @@ struct RootView: View {
         .sheet(isPresented: $model.outputShown) { OutputSheet().environmentObject(model).environmentObject(transport) }
         .sheet(isPresented: $model.setlistEditorShown) { SetlistEditor().environmentObject(model) }
         .sheet(isPresented: $model.goToShown) { GoToSheet().environmentObject(model) }
+        .sheet(isPresented: $model.showInfoShown) { ShowInfoSheet().environmentObject(model) }
         .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song).environmentObject(model) }
     }
 }

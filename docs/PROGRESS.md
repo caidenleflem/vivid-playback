@@ -187,3 +187,21 @@ file reads something else. Findings now carry `fixes` (core `IssueFix`), most li
 Show-changing fixes are off in show mode, apply only on click, reload the song (unless it's
 playing), re-check, and can be undone (Playback › Undo Fix, ⌥⌘Z, or Undo in the notice).
 `ShowFixer` (core) applies and undoes them; 67 tests pass, including each fix clearing its finding.
+
+## 2026-11-09: setlist order and Albums
+
+- Song list: **drag a song onto another to move it there** (setlist order), and Move Up / Down /
+  to Top / to Bottom in the right-click menu. A **Sort** menu (setlist order, song number, title,
+  timecode start, length) changes only the view; **Save This Order** makes it the setlist's
+  order. Playback always follows the setlist order, and says so while sorted.
+- The sheet's **Part** column (Act 1, Act 2, Encore…) comes in as `Song.part` and shows as
+  section headers in setlist order. "Part/Act/Set/Section" match whole headers only ("Offset"
+  contains "set").
+- **Albums** (⌘1 or the sidebar): every saved show in Documents › Vivid Playback, grouped by
+  artist, one album per setlist with its cover, show name, song count and running time. Click to
+  open (loads that show unless something's playing). Drop an image on a cover, or Choose Cover…,
+  to set artwork (copied into the show package).
+- **Artist and show name** come from the sheet's title line ("ARTIST · SHOW · LEG · SETLIST");
+  editable in Show Info… (⌘I, or double-click the show name in the sidebar).
+- Shows imported before this keep working; re-import to pick up acts, or set the artist in Show Info.
+- 70 tests pass.

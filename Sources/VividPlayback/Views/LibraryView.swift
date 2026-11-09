@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import PlaybackCore
 
 enum BrandImage {
@@ -63,7 +64,10 @@ struct Sidebar: View {
             HStack(spacing: 10) {
                 Emblem(width: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.show?.name ?? "No show").font(.manrope(13, .bold)).foregroundStyle(Brand.ink).lineLimit(1)
+                    if let artist = model.show?.artist {
+                        Text(artist.uppercased()).font(.manrope(10.5, .bold)).tracking(0.8).foregroundStyle(Brand.gold).lineLimit(1)
+                    }
+                    Text(model.show?.name ?? "No show").font(.manrope(13, .bold)).foregroundStyle(Brand.ink).lineLimit(2)
                     Text("\(model.show?.songs.count ?? 0) songs · \(model.show?.defaultRate.displayName ?? "")")
                         .font(.manrope(11.5)).foregroundStyle(Brand.space)
                     Button { model.revealShowFile() } label: {
@@ -74,6 +78,14 @@ struct Sidebar: View {
                 }
             }
             .padding(.horizontal, 8)
+            .contentShape(Rectangle())
+            .contextMenu { Button("Show Info…") { model.showInfoShown = true }.disabled(model.locked) }
+            .onTapGesture(count: 2) { if !model.locked { model.showInfoShown = true } }
+
+            section("Library") {
+                navRow("Albums", selected: model.screen == .albums) { model.go(.albums) }
+                navRow("Now playing", selected: model.screen == .library) { model.go(.library) }
+            }
 
             section("Setlists") {
                 ForEach(model.show?.setlists ?? []) { list in
@@ -351,17 +363,64 @@ struct SongList: View {
             }
             .font(.manrope(11, .bold)).tracking(1.1).foregroundStyle(Brand.graphite)
             .frame(height: 38)
+            .overlay(alignment: .trailing) { sortControls.padding(.trailing, 14) }
             Divider().overlay(.white.opacity(0.06))
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(model.setlistSongs.enumerated()), id: \.element.id) { index, song in
-                        songRow(song, index: index + 1)
+                    let songs = model.visibleSongs
+                    let order = model.setlistSongs.map(\.id)
+                    ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
+                        // Acts as sections, like discs on an album (in setlist order only).
+                        if model.sort == .setlist, let part = song.part, index == 0 || songs[index - 1].part != part {
+                            sectionHeader(part)
+                        }
+                        songRow(song, index: (order.firstIndex(of: song.id) ?? index) + 1)
                         Divider().overlay(.white.opacity(0.04))
                     }
                 }
             }
         }
         .solidPanel()
+    }
+
+    private var sortControls: some View {
+        HStack(spacing: 10) {
+            if model.sort != .setlist {
+                Text("Playback still follows the setlist").font(.manrope(11)).foregroundStyle(Brand.space)
+                Button("Save This Order") { model.saveSortedOrder() }
+                    .buttonStyle(QuietButtonStyle())
+                    .disabled(model.locked)
+                    .help("Make this the setlist's order")
+            }
+            Menu {
+                Picker("Sort by", selection: $model.sort) {
+                    ForEach(SetlistSort.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 10, weight: .semibold))
+                    Text(model.sort.displayName)
+                }
+                .font(.manrope(11.5, .semibold))
+                .foregroundStyle(model.sort == .setlist ? Brand.space : Brand.gold)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Sort the list. Drag songs to reorder the setlist (in setlist order).")
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        HStack {
+            Text(title.uppercased()).font(.manrope(11, .bold)).tracking(1.2).foregroundStyle(Brand.gold)
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+        .background(Color.white.opacity(0.015))
     }
 
     private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -426,12 +485,32 @@ struct SongList: View {
         .frame(height: 52)
         .background(isCurrent ? Brand.gold.opacity(0.09) : (selected == song.id ? Color.white.opacity(0.04) : .clear))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Brand.champagne.opacity(dropTarget == song.id ? 0.7 : 0), lineWidth: 1.5))
-        .dropDestination(for: URL.self) { urls, _ in
-            // A file dropped on a song: LTC/TC/timecode in the name makes it the timecode file.
-            guard !model.locked, let url = urls.first, FileMatcher.isAudio(url) else { return false }
-            model.dropFile(url, on: song)
-            return true
-        } isTargeted: { on in dropTarget = on ? song.id : (dropTarget == song.id ? nil : dropTarget) }
+        .onDrag {
+            // Drag a song to reorder the setlist.
+            NSItemProvider(object: "vivid-song:\(song.id.uuidString)" as NSString)
+        }
+        .onDrop(of: [.fileURL, .utf8PlainText, .plainText], isTargeted: Binding(
+            get: { dropTarget == song.id },
+            set: { on in dropTarget = on ? song.id : (dropTarget == song.id ? nil : dropTarget) })) { providers in
+            guard !model.locked, let provider = providers.first else { return false }
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                // An audio file dropped on a song: the app listens to tell timecode from a master.
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, FileMatcher.isAudio(url) else { return }
+                    DispatchQueue.main.async { model.dropFile(url, on: song) }
+                }
+                return true
+            }
+            if provider.canLoadObject(ofClass: NSString.self) {
+                _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                    guard let text = object as? String, text.hasPrefix("vivid-song:"),
+                          let id = UUID(uuidString: String(text.dropFirst("vivid-song:".count))), id != song.id else { return }
+                    DispatchQueue.main.async { model.moveSongs([id], before: song.id) }
+                }
+                return true
+            }
+            return false
+        }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             guard !skipped else { return }
@@ -442,6 +521,14 @@ struct SongList: View {
         .contextMenu {
             Button("Cue This Song") { model.cue(song) }.disabled(skipped)
             Button("Open Timeline") { model.cue(song); model.go(.timeline) }.disabled(skipped)
+            Divider()
+            Group {
+                Button("Move Up") { model.moveUp(song) }
+                Button("Move Down") { model.moveDown(song) }
+                Button("Move to Top") { model.moveToTop(song) }
+                Button("Move to Bottom") { model.moveToBottom(song) }
+            }
+            .disabled(model.locked || model.sort != .setlist)
             Divider()
             Button("Choose Master File…") { model.choose(.master, for: song) }.disabled(model.locked)
             Button("Choose Timecode File…") { model.choose(.timecode, for: song) }.disabled(model.locked)

@@ -76,7 +76,7 @@ enum ImportState {
 }
 
 enum Screen: Equatable {
-    case firstRun, library, timeline, clock
+    case firstRun, library, timeline, clock, albums
 }
 
 /// The song as it was before the last fix, so it can be put back.
@@ -117,6 +117,11 @@ final class AppModel: ObservableObject {
     @Published var notice: String?
     @Published var lastSaved: Date?
     @Published var lastFix: FixUndo?
+    /// How the song list is shown. Playback always follows the setlist order.
+    @Published var sort: SetlistSort = .setlist
+    /// Every saved show, for the Albums page.
+    @Published var library: [ShowLibrary.Entry] = []
+    @Published var showInfoShown = false
     /// The notice offers Undo (for the fix it reports).
     @Published var noticeOffersUndo = false
 
@@ -146,7 +151,107 @@ final class AppModel: ObservableObject {
     func refreshDevices() { devices = AudioDevices.all() }
 
     /// While a sheet is open, single-key shortcuts (Space, M, L, arrows) stay out of the way of typing.
-    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil }
+    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown }
+
+    static var showsFolder: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Vivid Playback")
+    }
+
+    // MARK: Albums and the song list order
+
+    /// The setlist's songs as the list shows them (sorted for viewing, or in setlist order).
+    var visibleSongs: [Song] {
+        guard let show, let setlist else { return setlistSongs }
+        return setlist.songIDs(sortedBy: sort, in: show).compactMap(show.song(id:))
+    }
+
+    func refreshLibrary() {
+        let folder = Self.showsFolder
+        Task {
+            let entries = await Task.detached(priority: .utility) { ShowLibrary.list(in: folder) }.value
+            self.library = entries
+        }
+    }
+
+    /// Opens a setlist from the Albums page (loading its show first if it isn't open).
+    func openAlbum(_ entry: ShowLibrary.Entry, setlistID: UUID) {
+        if packageURL?.standardizedFileURL != entry.url.standardizedFileURL {
+            guard !transport.isPlaying else { post("Stop playback before opening another show."); return }
+            open(package: entry.url)
+        }
+        if let list = show?.setlists.first(where: { $0.id == setlistID }) { select(setlist: list) }
+        sort = .setlist
+        go(.library)
+    }
+
+    private func editSetlist(_ change: (inout Setlist) -> Void) {
+        guard var list = setlist else { return }
+        change(&list)
+        updateSetlist(list)
+    }
+
+    /// Reorders by drag or menu. Only in setlist order: in a sorted view "before" is ambiguous.
+    func moveSongs(_ ids: [UUID], before target: UUID?) {
+        guard sort == .setlist else { post("Switch the list back to setlist order to move songs."); return }
+        editSetlist { $0.move(ids, before: target) }
+    }
+
+    func moveUp(_ song: Song) { guard sort == .setlist else { return }; editSetlist { $0.moveUp(song.id) } }
+    func moveDown(_ song: Song) { guard sort == .setlist else { return }; editSetlist { $0.moveDown(song.id) } }
+    func moveToTop(_ song: Song) { moveSongs([song.id], before: setlist?.songIDs.first) }
+    func moveToBottom(_ song: Song) { moveSongs([song.id], before: nil) }
+
+    /// Makes the current sort the setlist's order.
+    func saveSortedOrder() {
+        guard let show, var list = setlist, sort != .setlist else { return }
+        list.songIDs = list.songIDs(sortedBy: sort, in: show)
+        updateSetlist(list)
+        sort = .setlist
+        post("\(list.name) now plays in this order.")
+    }
+
+    /// Cover art for a setlist of the open show, or of another saved show.
+    func setArtwork(_ image: URL?, for setlistID: UUID, in entry: ShowLibrary.Entry? = nil) {
+        guard !locked else { return }
+        let package = entry?.url ?? packageURL
+        guard let package else { return }
+        let isCurrent = package.standardizedFileURL == packageURL?.standardizedFileURL
+        guard var target = isCurrent ? show : (try? ShowStore.load(from: package)),
+              let i = target.setlists.firstIndex(where: { $0.id == setlistID }) else { return }
+        if let image {
+            guard let path = try? ShowLibrary.storeArtwork(image, for: target.setlists[i], in: package) else {
+                post("Couldn't use \(image.lastPathComponent) as a cover.")
+                return
+            }
+            target.setlists[i].artwork = path
+        } else {
+            target.setlists[i].artwork = nil
+        }
+        if isCurrent {
+            show = target
+            save()
+        } else {
+            try? ShowStore.save(target, to: package)
+        }
+        refreshLibrary()
+    }
+
+    func chooseArtwork(for setlistID: UUID, in entry: ShowLibrary.Entry? = nil) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.prompt = "Use as Cover"
+        if panel.runModal() == .OK, let url = panel.url { setArtwork(url, for: setlistID, in: entry) }
+    }
+
+    func updateShowInfo(artist: String, name: String) {
+        let a = artist.trimmingCharacters(in: .whitespaces)
+        let n = name.trimmingCharacters(in: .whitespaces)
+        edit { show in
+            show.artist = a.isEmpty ? nil : a
+            if !n.isEmpty { show.name = n }
+        }
+        refreshLibrary()
+    }
 
     /// Every song in the setlist, in order, including the ones skipped tonight.
     var setlistSongs: [Song] {
@@ -705,6 +810,8 @@ final class AppModel: ObservableObject {
         transport.configure(routing: show.routing)
         if let first = queue.first { cue(first, play: false) }
         UserDefaults.standard.set(package.path, forKey: "lastShowPath")
+        sort = .setlist
+        refreshLibrary()
     }
 
     /// Saves after every change. A failure is said out loud, never swallowed.
@@ -713,6 +820,9 @@ final class AppModel: ObservableObject {
         do {
             try ShowStore.save(show, to: packageURL)
             lastSaved = Date()
+            if let i = library.firstIndex(where: { $0.url.standardizedFileURL == packageURL.standardizedFileURL }) {
+                library[i] = ShowLibrary.Entry(url: packageURL, show: show)
+            }
         } catch {
             post("Couldn't save the show to \(packageURL.path): \(error.localizedDescription)")
         }
