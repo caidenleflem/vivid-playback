@@ -66,6 +66,11 @@ struct Sidebar: View {
                     Text(model.show?.name ?? "No show").font(.manrope(13, .bold)).foregroundStyle(Brand.ink).lineLimit(1)
                     Text("\(model.show?.songs.count ?? 0) songs · \(model.show?.defaultRate.displayName ?? "")")
                         .font(.manrope(11.5)).foregroundStyle(Brand.space)
+                    Button { model.revealShowFile() } label: {
+                        Text("Saved automatically").font(.manrope(11)).foregroundStyle(Brand.graphite)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Every change saves itself to Documents › Vivid Playback. Click to show the file in Finder. ⌘S saves once more; ⇧⌘S saves a copy.")
                 }
             }
             .padding(.horizontal, 8)

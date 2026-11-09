@@ -109,6 +109,7 @@ final class AppModel: ObservableObject {
     @Published var devices: [AudioDevice] = []
     /// A short message after adding or changing files; clears itself.
     @Published var notice: String?
+    @Published var lastSaved: Date?
 
     let transport = Transport()
     private let reader = AVAudioFileReader()
@@ -596,9 +597,45 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(package.path, forKey: "lastShowPath")
     }
 
+    /// Saves after every change. A failure is said out loud, never swallowed.
     func save() {
         guard let show, let packageURL else { return }
-        try? ShowStore.save(show, to: packageURL)
+        do {
+            try ShowStore.save(show, to: packageURL)
+            lastSaved = Date()
+        } catch {
+            post("Couldn't save the show to \(packageURL.path): \(error.localizedDescription)")
+        }
+    }
+
+    /// File › Save: the show is already saved; this saves once more and says where.
+    func saveNow() {
+        guard let packageURL else { return }
+        save()
+        post("Saved to \(packageURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). Every change saves itself.")
+    }
+
+    /// A copy of the show file somewhere else (a backup, a USB stick). The audio stays where it is;
+    /// on another Mac, use Relink Media Folder to point the copy at the audio.
+    func saveCopy() {
+        guard let show else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(show.name).\(ShowStore.fileExtension)"
+        panel.prompt = "Save Copy"
+        panel.message = "Saves a copy of the show file. The audio files aren't copied."
+        guard panel.runModal() == .OK, var url = panel.url else { return }
+        if url.pathExtension != ShowStore.fileExtension { url.appendPathExtension(ShowStore.fileExtension) }
+        do {
+            try ShowStore.save(show, to: url)
+            post("Copy saved to \(url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")).")
+        } catch {
+            post("Couldn't save the copy: \(error.localizedDescription)")
+        }
+    }
+
+    func revealShowFile() {
+        guard let packageURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([packageURL])
     }
 
     private func reopenLastShow() {

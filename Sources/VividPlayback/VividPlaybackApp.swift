@@ -44,6 +44,15 @@ struct PlaybackCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(model.locked)
             Divider()
+            Button("Save") { model.saveNow() }
+                .keyboardShortcut("s")
+                .disabled(model.show == nil)
+            Button("Save a Copy…") { model.saveCopy() }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(model.show == nil)
+            Button("Show Show File in Finder") { model.revealShowFile() }
+                .disabled(model.show == nil)
+            Divider()
             Button("Add Audio Files…") { model.chooseAudio() }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .disabled(model.locked || model.show == nil)

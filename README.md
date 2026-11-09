@@ -53,7 +53,10 @@ file can't be read, no timecode is sent and a red chip says so; it never substit
 and the timecode output. On a two-output Mac, put the master on Output 1 (mono) and timecode on
 Output 2. The timecode level is set on its own and never follows the master level.
 
-Shows are saved in `~/Documents/Vivid Playback` as `.vividshow` packages and reopen on launch.
+**Saving:** every change saves itself to `~/Documents/Vivid Playback/<show>.vividshow`, and the
+last show reopens on launch, including after installing a new version. **File › Save** (⌘S)
+saves once more and says where; **Save a Copy…** (⇧⌘S) makes a backup or a copy for a USB
+stick; **Show Show File in Finder** opens the folder.
 
 ## What's in this build
 
