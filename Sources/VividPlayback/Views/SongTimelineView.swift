@@ -88,7 +88,7 @@ struct SongTimelineView: View {
                     case .file(let name):
                         if transport.trackFound, let first = transport.firstFileTimecode {
                             Chip("From \(name) · \(first)") { StatusDot(color: Brand.ok) }
-                                .help("Timecode comes from this file. Its first frame reads \(first).")
+                                .help("Timecode comes from this file. Its first frame reads \(first.description).")
                         } else if !transport.isLoading {
                             Chip("No timecode found in \(name)") { StatusDot(color: Color(hex: 0xE5675A)) }
                         }
