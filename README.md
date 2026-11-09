@@ -9,9 +9,10 @@ timeline only when you ask for it.
 
 ## Get the app
 
-Every push to `main` is built on a GitHub Mac. Download the newest installer from this repo's
-**Releases** page ("Latest build" → `Vivid Playback x.y.z.dmg`), open it and drag Vivid Playback
-to Applications. It runs on macOS 13 (Ventura) or later, on Apple silicon and Intel.
+Every push to `main` is built on a GitHub Mac and published as its own version
+(`Vivid Playback 0.2.N.dmg`) on this repo's **Releases** page; the newest is marked Latest.
+Open it and drag Vivid Playback to Applications, choosing **Replace** if asked. Shows live in
+Documents › Vivid Playback, so updating or deleting the app never touches them. It runs on macOS 13 (Ventura) or later, on Apple silicon and Intel.
 
 The first time you open it, macOS may block it because it isn't signed with an Apple Developer
 ID. Open **System Settings › Privacy & Security**, scroll down and click **Open Anyway** (on older
