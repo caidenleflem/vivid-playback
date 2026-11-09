@@ -19,6 +19,17 @@ struct IssueRow: View {
                     Text("Needs fixing before the show; it can't be hidden.")
                         .font(.manrope(11.5)).foregroundStyle(Brand.graphite)
                 }
+                if !hidden && !issue.fixes.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(issue.fixes.enumerated()), id: \.offset) { index, fix in
+                            Button(model.fixLabel(fix, for: issue)) { model.perform(fix, for: issue) }
+                                .buttonStyle(QuietButtonStyle(prominent: index == 0 && fix.changesShow))
+                                .disabled(fix.changesShow && model.locked)
+                                .help(model.fixHelp(fix, for: issue))
+                        }
+                    }
+                    .padding(.top, 6)
+                }
             }
             Spacer(minLength: 8)
             if hidden {

@@ -81,6 +81,9 @@ struct PlaybackCommands: Commands {
             Button(model.transport.loop == nil ? "Loop Between Markers" : "Stop Looping") { model.toggleLoop() }
                 .keyboardShortcut("l", modifiers: [])
                 .disabled(typing || model.show == nil)
+            Button("Undo Fix") { model.undoFix() }
+                .keyboardShortcut("z", modifiers: [.command, .option])
+                .disabled(model.lastFix == nil || model.locked)
             Button("Add Marker") { model.addMarker() }
                 .keyboardShortcut("m", modifiers: [])
                 .disabled(typing || model.locked || model.screen != .timeline)
@@ -139,10 +142,15 @@ struct RootView: View {
             if let notice = model.notice, model.screen != .firstRun {
                 VStack {
                     Spacer()
-                    Text(notice)
-                        .font(.manrope(13.5, .medium))
-                        .foregroundStyle(Brand.ink)
-                        .multilineTextAlignment(.center)
+                    HStack(spacing: 14) {
+                        Text(notice)
+                            .font(.manrope(13.5, .medium))
+                            .foregroundStyle(Brand.ink)
+                            .multilineTextAlignment(.center)
+                        if model.noticeOffersUndo && model.lastFix != nil {
+                            Button("Undo") { model.undoFix() }.buttonStyle(QuietButtonStyle())
+                        }
+                    }
                         .padding(.horizontal, 18)
                         .padding(.vertical, 11)
                         .frame(maxWidth: 620)

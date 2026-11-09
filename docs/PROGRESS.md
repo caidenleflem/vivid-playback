@@ -172,3 +172,18 @@ Caiden hit a crash clicking Hide. Likely causes, all fixed (not reproducible her
   button finishes before its row disappears.
 Builds: GitHub's macOS runners stopped picking up jobs (macos-14 is retired; macos-15 and
 macos-latest jobs sit queued). Caiden builds locally with `./scripts/make-dmg.sh` meanwhile.
+
+## 2026-11-09: one-click fixes on findings
+
+Caiden asked for ways to fix a finding, e.g. updating a song's stored start when its timecode
+file reads something else. Findings now carry `fixes` (core `IssueFix`), most likely first:
+- Timecode starts elsewhere: **Use the file's timecode** (song start = what the file reads at the
+  file offset; markers move with it) and, when the file contains the sheet's start, **Start where
+  the file reads <sheet start>** (file offset = where it does; the audio doesn't move).
+- Frame rate differs: **Use <rate>, like the file** (start and markers converted).
+- Missing/unreadable files, no LTC found: **Choose master… / Choose timecode file…**
+- Timecode jumps or drops out: **Go there** (cues the song at the problem).
+- Converted for the interface: **Audio output…**
+Show-changing fixes are off in show mode, apply only on click, reload the song (unless it's
+playing), re-check, and can be undone (Playback › Undo Fix, ⌥⌘Z, or Undo in the notice).
+`ShowFixer` (core) applies and undoes them; 67 tests pass, including each fix clearing its finding.

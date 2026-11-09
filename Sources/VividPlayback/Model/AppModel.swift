@@ -79,6 +79,12 @@ enum Screen: Equatable {
     case firstRun, library, timeline, clock
 }
 
+/// The song as it was before the last fix, so it can be put back.
+struct FixUndo {
+    let song: Song
+    let label: String
+}
+
 struct MarkerEdit: Identifiable {
     let marker: Marker
     let song: Song
@@ -110,6 +116,9 @@ final class AppModel: ObservableObject {
     /// A short message after adding or changing files; clears itself.
     @Published var notice: String?
     @Published var lastSaved: Date?
+    @Published var lastFix: FixUndo?
+    /// The notice offers Undo (for the fix it reports).
+    @Published var noticeOffersUndo = false
 
     let transport = Transport()
     private let reader = AVAudioFileReader()
@@ -379,6 +388,79 @@ final class AppModel: ObservableObject {
         return "No song in this setlist plays at \(text)."
     }
 
+    // MARK: Fixing findings
+
+    func fixLabel(_ fix: IssueFix, for issue: ShowIssue) -> String {
+        let song = issue.songID.flatMap { show?.song(id: $0) }
+        switch fix {
+        case .useFileStart(let tc): return "Use the file's timecode (\(tc))"
+        case .alignToSheet(let offset):
+            return "Start where the file reads \(song?.start.description ?? "the sheet's start") (\(String(format: "%.2f", offset)) s in)"
+        case .useFileRate(let rate): return "Use \(rate.displayName), like the file"
+        case .chooseMaster: return song?.masterPath == nil ? "Choose master…" : "Choose another master…"
+        case .chooseTimecode: return song?.timecodePath == nil ? "Choose timecode file…" : "Choose another timecode file…"
+        case .locate: return "Go there"
+        case .audioOutput: return "Audio output…"
+        }
+    }
+
+    func fixHelp(_ fix: IssueFix, for issue: ShowIssue) -> String {
+        let name = issue.songID.flatMap { show?.song(id: $0)?.title } ?? "The song"
+        switch fix {
+        case .useFileStart(let tc):
+            return "Changes \(name)'s start on the show to \(tc), what its timecode file reads. The audio and the timecode going out don't change; the clock, markers and checks follow the file."
+        case .alignToSheet(let offset):
+            return "Keeps the sheet's start and begins \(name) \(String(format: "%.2f", offset)) s into its files, where the timecode file reads it. Anything before that plays as pre-roll."
+        case .useFileRate(let rate):
+            return "Sets \(name) to \(rate.displayName), the rate its timecode file runs at."
+        case .chooseMaster, .chooseTimecode: return "Pick the file for \(name)."
+        case .locate: return "Cues \(name) and puts the playhead where the problem is, so you can listen."
+        case .audioOutput: return "Open the audio output settings."
+        }
+    }
+
+    /// Carries out a fix the person clicked. Fixes that change the show are off in show mode
+    /// and can be undone (Edit › Undo Fix).
+    func perform(_ fix: IssueFix, for issue: ShowIssue) {
+        if case .audioOutput = fix {
+            issuesShown = false
+            outputShown = true
+            return
+        }
+        guard let songID = issue.songID, let song = show?.song(id: songID) else { return }
+        switch fix {
+        case .chooseMaster: choose(.master, for: song)
+        case .chooseTimecode: choose(.timecode, for: song)
+        case .locate(let seconds):
+            issuesShown = false
+            if currentSong?.id != songID { cue(song, play: false) }
+            DispatchQueue.main.async { self.transport.locate(seconds) }
+        case .audioOutput: break
+        case .useFileStart, .alignToSheet, .useFileRate:
+            guard !locked else { post("Show mode is on. Turn it off (⇧⌘L) to change the show."); return }
+            let label = fixLabel(fix, for: issue)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, var show = self.show else { return }
+                guard let before = ShowFixer.apply(fix, songID: songID, to: &show) else { return }
+                self.show = show
+                self.save()
+                self.lastFix = FixUndo(song: before, label: label)
+                self.filesChanged(before)
+                self.post("\(song.title): \(label.prefix(1).lowercased() + label.dropFirst()). Undo with ⌥⌘Z.", undo: true)
+            }
+        }
+    }
+
+    func undoFix() {
+        guard let u = lastFix, var show, !locked else { return }
+        ShowFixer.undo(u.song, in: &show)
+        self.show = show
+        save()
+        lastFix = nil
+        filesChanged(u.song)
+        post("Undone: \(u.song.title) is back as it was.")
+    }
+
     // MARK: Adding audio after import
 
     /// Matches files (or whole folders) to the songs still missing a master or timecode file.
@@ -466,7 +548,8 @@ final class AppModel: ObservableObject {
         assign(url, role: role == .timecode ? .timecode : .master, to: song)
     }
 
-    func post(_ text: String) {
+    func post(_ text: String, undo: Bool = false) {
+        noticeOffersUndo = undo
         withAnimation(.vivid(0.3)) { notice = text }
         Task {
             try? await Task.sleep(nanoseconds: 7_000_000_000)
