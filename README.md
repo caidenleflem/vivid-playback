@@ -30,6 +30,13 @@ folder: `./scripts/make-dmg.sh`. The installer lands in `build/`.
 - The app reads the sheet, matches every file to its song, decodes the LTC in every timecode
   file, and tells you about anything that doesn't line up. It never fixes anything silently.
 - **Try the example show** to see it work before you have files to hand.
+- **Add audio after importing:** drop files or a folder on the song list and they're matched to
+  the songs still missing them (never replacing a file a song already has). Drop one file on a
+  song to give it that file: "LTC", "TC" or "timecode" in the name makes it the timecode file.
+  Or right-click a song, or use the file names in the song timeline, to choose, replace or
+  remove its master or timecode file. **File › Add Audio Files…** (⇧⌘A) does the same from a
+  picker. A timecode file given to a song the sheet left without timecode sets its start from
+  the LTC in the file.
 
 Keys: **Space** play or pause · **← →** previous and next song · **⌘←** top of the song ·
 **Return** or **⌘T** song timeline · **M** add a marker · **L** loop between markers ·

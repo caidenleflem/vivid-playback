@@ -94,8 +94,8 @@ struct SongTimelineView: View {
                     }
                 }
                 HStack(spacing: 22) {
-                    fileLabel("Master", song.masterPath)
-                    fileLabel("Timecode", song.timecodePath)
+                    fileMenu("Master", song.masterPath, role: .master, song: song)
+                    fileMenu("Timecode", song.timecodePath, role: .timecode, song: song)
                 }
                 .font(.manrope(12.5))
             }
@@ -103,11 +103,23 @@ struct SongTimelineView: View {
         }
     }
 
-    private func fileLabel(_ label: String, _ path: String?) -> some View {
-        HStack(spacing: 6) {
-            Text(label).fontWeight(.semibold).foregroundStyle(Brand.steel)
-            Text(path.map { ($0 as NSString).lastPathComponent } ?? "Not matched").foregroundStyle(Brand.space)
+    private func fileMenu(_ label: String, _ path: String?, role: AudioRole, song: Song) -> some View {
+        Menu {
+            Button(path == nil ? "Choose \(label) File…" : "Replace \(label) File…") { model.choose(role, for: song) }
+            if path != nil { Button("Remove \(label) File") { model.removeFile(role, from: song) } }
+        } label: {
+            HStack(spacing: 6) {
+                Text(label).fontWeight(.semibold).foregroundStyle(Brand.steel)
+                Text(path.map { ($0 as NSString).lastPathComponent } ?? "Choose a file…")
+                    .foregroundStyle(path == nil ? Brand.gold : Brand.space)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Brand.graphite)
+            }
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(model.locked)
+        .help("Choose or replace this song's \(label.lowercased()) file. You can also drop a file on the song in the library.")
     }
 }
 

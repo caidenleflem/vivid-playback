@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import UniformTypeIdentifiers
 import QuartzCore
 import PlaybackCore
 
@@ -96,6 +97,8 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(stopAfterEach, forKey: "stopAfterEach") }
     }
     @Published var devices: [AudioDevice] = []
+    /// A short message after adding or changing files; clears itself.
+    @Published var notice: String?
 
     let transport = Transport()
     private let reader = AVAudioFileReader()
@@ -338,6 +341,87 @@ final class AppModel: ObservableObject {
         }
         if Timecode(text, rate: show.defaultRate) == nil { return "That isn't a timecode. Use HH:MM:SS:FF." }
         return "No song in this setlist plays at \(text)."
+    }
+
+    // MARK: Adding audio after import
+
+    /// Matches files (or whole folders) to the songs still missing a master or timecode file.
+    func addAudio(_ urls: [URL]) {
+        guard !locked, var show else { return }
+        let result = ShowImporter.attach(ShowImporter.expand(urls), to: &show)
+        self.show = show
+        save()
+        filesChanged()
+        post(result.summary)
+    }
+
+    func chooseAudio() {
+        guard !locked, show != nil else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        panel.message = "Choose masters, timecode files or a folder of them. They're matched to songs by number or title."
+        if panel.runModal() == .OK { addAudio(panel.urls) }
+    }
+
+    /// Sets one song's master or timecode file from a file picker.
+    func choose(_ role: AudioRole, for song: Song) {
+        guard !locked else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio]
+        panel.prompt = "Use This File"
+        panel.message = role == .timecode ? "Choose the timecode (LTC) file for \(song.title)." : "Choose the master for \(song.title)."
+        if panel.runModal() == .OK, let url = panel.url { assign(url, role: role, to: song) }
+    }
+
+    func assign(_ url: URL, role: AudioRole, to song: Song) {
+        guard !locked, var show else { return }
+        do {
+            let updated = try ShowImporter.assign(url, role: role, songID: song.id, in: &show, reader: reader)
+            self.show = show
+            save()
+            filesChanged()
+            if role == .timecode, !song.hasTimecode, let u = updated {
+                post("\(u.title) now sends timecode, starting at \(u.start) (read from \(url.lastPathComponent)).")
+            } else {
+                post("\(song.title): \(role == .timecode ? "timecode" : "master") is now \(url.lastPathComponent).")
+            }
+        } catch {
+            post(String(describing: error))
+        }
+    }
+
+    func removeFile(_ role: AudioRole, from song: Song) {
+        guard !locked, var show else { return }
+        ShowImporter.remove(role, songID: song.id, in: &show)
+        self.show = show
+        save()
+        filesChanged()
+    }
+
+    /// After files change: drop cached audio and waveforms, reload the cued song if it isn't
+    /// playing (never mid-song), and check everything again.
+    private func filesChanged() {
+        guard let show else { return }
+        transport.invalidateCache()
+        waveforms = [:]
+        if let song = currentSong {
+            if transport.isPlaying { transport.update(song, in: show) } else { cue(song, play: false) }
+        }
+        recheck()
+    }
+
+    func post(_ text: String) {
+        withAnimation(.vivid(0.3)) { notice = text }
+        Task {
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
+            if notice == text { withAnimation(.vivid(0.3)) { notice = nil } }
+        }
     }
 
     // MARK: Import, open, save

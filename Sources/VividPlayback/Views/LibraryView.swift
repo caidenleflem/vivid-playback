@@ -23,6 +23,7 @@ struct Emblem: View {
 }
 
 struct LibraryView: View {
+    @EnvironmentObject private var model: AppModel
     let morph: Namespace.ID
 
     var body: some View {
@@ -40,6 +41,11 @@ struct LibraryView: View {
                     .padding(.bottom, 14)
                 SongList()
                     .transition(.opacity.combined(with: .offset(y: 40)))
+                    .dropDestination(for: URL.self) { urls, _ in
+                        guard !model.locked else { return false }
+                        model.addAudio(urls)
+                        return true
+                    }
                     .padding(.bottom, 12)
             }
             .padding(.trailing, 14)
@@ -325,6 +331,7 @@ struct SongList: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
     @State private var selected: UUID?
+    @State private var dropTarget: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -398,6 +405,13 @@ struct SongList: View {
         .foregroundStyle(Brand.steel)
         .frame(height: 52)
         .background(isCurrent ? Brand.gold.opacity(0.09) : (selected == song.id ? Color.white.opacity(0.04) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Brand.champagne.opacity(dropTarget == song.id ? 0.7 : 0), lineWidth: 1.5))
+        .dropDestination(for: URL.self) { urls, _ in
+            // A file dropped on a song: LTC/TC/timecode in the name makes it the timecode file.
+            guard !model.locked, let url = urls.first, FileMatcher.isAudio(url) else { return false }
+            model.assign(url, role: FileMatcher.role(forFileName: url.lastPathComponent) == .timecode ? .timecode : .master, to: song)
+            return true
+        } isTargeted: { on in dropTarget = on ? song.id : (dropTarget == song.id ? nil : dropTarget) }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             guard !skipped else { return }
@@ -408,6 +422,11 @@ struct SongList: View {
         .contextMenu {
             Button("Cue This Song") { model.cue(song) }.disabled(skipped)
             Button("Open Timeline") { model.cue(song); model.go(.timeline) }.disabled(skipped)
+            Divider()
+            Button("Choose Master File…") { model.choose(.master, for: song) }.disabled(model.locked)
+            Button("Choose Timecode File…") { model.choose(.timecode, for: song) }.disabled(model.locked)
+            if song.masterPath != nil { Button("Remove Master File") { model.removeFile(.master, from: song) }.disabled(model.locked) }
+            if song.timecodePath != nil { Button("Remove Timecode File") { model.removeFile(.timecode, from: song) }.disabled(model.locked) }
             Divider()
             Button(skipped ? "Play Tonight" : "Skip Tonight") { model.toggleSkip(song) }.disabled(model.locked)
         }

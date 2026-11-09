@@ -117,3 +117,15 @@ itself parsed (header on row 4, "LTC start" column, durations), but:
 **Noticed on the sheet (reported by the app as warnings, not changed)**
 - Intros share their song's address (00:20:00:00, 01:50:00:00).
 - 04:30:00:00 is a cue row ("NOT A SONG").
+
+## 2026-11-09: adding audio after import
+
+Caiden asked whether masters and LTC files can be added once a sheet is imported. Now:
+- Drop files or folders on the song list: matched like an import, filling only what's missing.
+- Drop a file on a song row: LTC/TC/timecode in the name sets the timecode file, else the master.
+- Right-click a song, or the file names in the song timeline: choose, replace, remove.
+- File › Add Audio Files… (⇧⌘A).
+- A timecode file on a no-timecode song reads the LTC and sets the song's start from it
+  (and says so); a file with no LTC is refused and nothing changes.
+- Files outside the show folder keep their full path. Nothing reloads mid-song.
+- 54 tests pass.

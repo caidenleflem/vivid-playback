@@ -44,6 +44,9 @@ struct PlaybackCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(model.locked)
             Divider()
+            Button("Add Audio Files…") { model.chooseAudio() }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .disabled(model.locked || model.show == nil)
             Button("Relink Media Folder…") { model.relink() }
                 .disabled(model.locked || model.show == nil)
             Button("Check Files Again") { model.recheck() }
@@ -123,6 +126,24 @@ struct RootView: View {
                 SongTimelineView(morph: morph)
             case .clock:
                 ClockScreen(morph: morph).transition(.opacity)
+            }
+            if let notice = model.notice, model.screen != .firstRun {
+                VStack {
+                    Spacer()
+                    Text(notice)
+                        .font(.manrope(13.5, .medium))
+                        .foregroundStyle(Brand.ink)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 11)
+                        .frame(maxWidth: 620)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Brand.phantom))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
+                        .padding(.bottom, 28)
+                        .onTapGesture { model.notice = nil }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if case .lost(let message) = transport.status, model.screen != .firstRun {
                 LostOutputBanner(message: message)

@@ -159,7 +159,7 @@ struct FirstRunView: View {
     private func summary(_ report: ImportReport) -> String {
         let n = report.show.songs.count
         if report.masterCount == 0 {
-            return "\(n) songs read. No audio was found next to the sheet, so it runs timecode only. Drop the whole show folder to add the masters."
+            return "\(n) songs read, timecode only for now. Add the masters and timecode files after opening: drop them (or their folder) on the song list."
         }
         let ready = report.readyCount
         if ready == n { return n == 1 ? "1 song ready." : "All \(n) songs ready." }
