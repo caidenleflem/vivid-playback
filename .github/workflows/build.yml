@@ -31,7 +31,9 @@ jobs:
 
       - name: Version
         # Each build gets its own number: 0.2.<build number>.
-        run: echo "VERSION=0.2.${{ github.run_number }}" >> "$GITHUB_ENV"
+        run: |
+          echo "VERSION=0.2.${{ github.run_number }}" >> "$GITHUB_ENV"
+          echo "SUBJECT=$(git log -1 --format=%s)" >> "$GITHUB_ENV"
 
       - name: Build the installer
         run: ./scripts/make-dmg.sh
@@ -89,7 +91,6 @@ jobs:
         run: |
           # The old single "latest" release is replaced by one release per version.
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          SUBJECT="$(git log -1 --format=%s)"
           gh release create "v$VERSION" build/*.dmg \
             --title "Vivid Playback $VERSION" \
             --target "$GITHUB_SHA" \
