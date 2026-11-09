@@ -489,6 +489,7 @@ final class AppModel: ObservableObject {
         save()
         if before.deviceUID != show.routing.deviceUID {
             transport.configure(routing: show.routing)
+            recheck()
         } else {
             transport.applyRouting(show.routing)
         }

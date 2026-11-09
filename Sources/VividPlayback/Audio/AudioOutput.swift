@@ -124,7 +124,11 @@ final class AudioOutput {
         }
         source = node
         self.device = device
-        latency = output.presentationLatency
+        // What you hear lags what was just rendered by the device's latency and one IO buffer.
+        // Dante Virtual Soundcard adds its own buffering, reported through the same properties.
+        let deviceFrames = AudioDevices.outputLatencyFrames(device.id)
+        let ioFrames = AudioDevices.bufferFrames(device.id)
+        latency = max(output.presentationLatency, Double(deviceFrames) / sampleRate) + Double(ioFrames) / sampleRate
     }
 
     func stop() {

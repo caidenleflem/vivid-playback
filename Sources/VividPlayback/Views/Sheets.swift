@@ -58,7 +58,7 @@ struct OutputSheet: View {
                         get: { routing.deviceUID ?? device?.uid ?? "" },
                         set: { uid in model.updateRouting { $0.deviceUID = uid } })) {
                         ForEach(model.devices) { d in
-                            Text("\(d.name) · \(d.outputChannels) outputs · \(Int(d.sampleRate)) Hz").tag(d.uid)
+                            Text("\(d.name)\(d.isDante ? " · Dante" : "") · \(d.outputChannels) outputs · \(Int(d.sampleRate)) Hz").tag(d.uid)
                         }
                     }
                     .labelsHidden()
@@ -75,7 +75,7 @@ struct OutputSheet: View {
                             Text("Outputs \(c)–\(c + 1) (stereo)").tag(c)
                         }
                         ForEach(1...channels, id: \.self) { c in
-                            Text("Output \(c) only (mono)").tag(-c)
+                            Text("\(device?.outputLabel(c) ?? "Output \(c)") only (mono)").tag(-c)
                         }
                     }
                     .labelsHidden()
@@ -87,11 +87,15 @@ struct OutputSheet: View {
                         set: { c in model.updateRouting { $0.timecodeChannel = c == 0 ? nil : c } })) {
                         Text("Not sent").tag(0)
                         ForEach(1...channels, id: \.self) { c in
-                            Text(routing.masterChannels.contains(c) ? "Output \(c) (used by the master)" : "Output \(c)").tag(c)
+                            let label = device?.outputLabel(c) ?? "Output \(c)"
+                            Text(routing.masterChannels.contains(c) ? "\(label) (used by the master)" : label).tag(c)
                         }
                     }
                     .labelsHidden()
                     .frame(width: 340)
+                }
+                if let d = device, d.isDante {
+                    danteCard(d, routing: routing)
                 }
                 if let tc = routing.timecodeChannel, routing.masterChannels.contains(tc) {
                     note("Timecode can't share an output with the master. Pick another output, or put the master on one output (mono).", warn: true)
@@ -141,6 +145,51 @@ struct OutputSheet: View {
         }
         .disabled(model.locked)
         .onAppear { model.refreshDevices() }
+    }
+
+    private func danteCard(_ d: AudioDevice, routing: OutputRouting) -> some View {
+        let converted = model.issues.filter { $0.kind == .deviceSampleRate }.count
+        let latencyMs = transport.audio.device?.uid == d.uid ? transport.audio.latency * 1000 : nil
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("DANTE")
+                    .font(.manrope(10.5, .heavy)).tracking(1.2)
+                    .foregroundStyle(Color(hex: 0x120D05))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(Brand.gold))
+                Text("\(d.name) · \(d.outputChannels) transmit channels · \(Int(d.sampleRate)) Hz")
+                    .font(.manrope(12.5, .semibold)).foregroundStyle(Brand.ink)
+                Spacer()
+                let ready = routing.masterChannels == [1, 2] && routing.timecodeChannel == 3
+                Button(ready ? "Set up for Dante ✓" : "Set up for Dante") {
+                    model.updateRouting { $0.masterChannels = [1, 2]; $0.timecodeChannel = 3 }
+                }
+                .buttonStyle(QuietButtonStyle(prominent: !ready))
+                .disabled(ready || d.outputChannels < 3)
+                .help("Master on Dante channels 1–2, timecode on channel 3. Route them in Dante Controller.")
+            }
+            Text("In Dante Controller, route this Mac's transmit channels: 1–2 (master) to front of house and monitors, \(routing.timecodeChannel.map { "\($0)" } ?? "3") (timecode) to a Dante output that feeds the console's LTC input.")
+                .font(.manrope(12)).foregroundStyle(Brand.steel).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 16) {
+                Label(converted == 0 ? "Songs match \(Int(d.sampleRate)) Hz" : "\(converted) \(converted == 1 ? "song is" : "songs are") converted to \(Int(d.sampleRate)) Hz",
+                      systemImage: converted == 0 ? "checkmark.circle" : "arrow.triangle.2.circlepath")
+                    .foregroundStyle(converted == 0 ? Brand.ok : Brand.warn)
+                if let ms = latencyMs {
+                    Label(String(format: "%.1f ms output latency, allowed for", ms), systemImage: "clock")
+                        .foregroundStyle(Brand.space)
+                        .help("The clock, MTC and Art-Net are offset by this so they match the timecode as it leaves Dante.")
+                }
+            }
+            .font(.manrope(11.5, .medium))
+            if converted > 0 {
+                Text("Set the Dante network (or Dante Virtual Soundcard) to the songs' sample rate to avoid converting, or leave it: conversion is high quality.")
+                    .font(.manrope(11.5)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Brand.solid))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Brand.gold.opacity(0.35), lineWidth: 1))
     }
 
     private func note(_ text: String, warn: Bool) -> some View {

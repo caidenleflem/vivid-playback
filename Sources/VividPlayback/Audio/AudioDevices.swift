@@ -9,6 +9,24 @@ struct AudioDevice: Identifiable, Hashable {
     let outputChannels: Int
     let sampleRate: Double
     var inputChannels: Int = 0
+    var manufacturer: String = ""
+    /// Names macOS gives the output channels (Dante devices often carry their channel labels).
+    var channelNames: [String] = []
+
+    /// Dante Virtual Soundcard, Dante Via, or an interface from Audinate's ecosystem.
+    var isDante: Bool {
+        let n = name.lowercased(), m = manufacturer.lowercased()
+        return n.contains("dante") || m.contains("audinate")
+    }
+
+    /// "Output 3 · FOH LTC", or just "Output 3" when the channel has no real name.
+    func outputLabel(_ channel: Int) -> String {
+        let i = channel - 1
+        guard i >= 0, i < channelNames.count else { return "Output \(channel)" }
+        let n = channelNames[i].trimmingCharacters(in: .whitespaces)
+        if n.isEmpty || n == String(channel) || Int(n) != nil { return "Output \(channel)" }
+        return "Output \(channel) · \(n)"
+    }
 }
 
 /// Core Audio's list of output devices.
@@ -58,7 +76,9 @@ enum AudioDevices {
                            uid: string(id, kAudioDevicePropertyDeviceUID) ?? "\(id)",
                            name: string(id, kAudioObjectPropertyName) ?? "Audio device",
                            outputChannels: channels,
-                           sampleRate: nominalSampleRate(id))
+                           sampleRate: nominalSampleRate(id),
+                           manufacturer: string(id, kAudioObjectPropertyManufacturer) ?? "",
+                           channelNames: (1...max(1, channels)).map { channelName(id, $0) ?? "" })
     }
 
     /// Calls `onChange` on the main queue whenever interfaces are plugged in or unplugged.
@@ -68,6 +88,49 @@ enum AudioDevices {
         return AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main) { _, _ in
             onChange()
         } == noErr
+    }
+
+    /// Total output latency in frames: the device's own latency, its safety offset and the
+    /// output stream's latency. (The IO buffer is added separately.)
+    static func outputLatencyFrames(_ id: AudioDeviceID) -> Int {
+        func u32(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope) -> Int {
+            var addr = address(selector, scope: scope)
+            var v = UInt32(0)
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            return AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &v) == noErr ? Int(v) : 0
+        }
+        var total = u32(kAudioDevicePropertyLatency, scope: kAudioDevicePropertyScopeOutput)
+            + u32(kAudioDevicePropertySafetyOffset, scope: kAudioDevicePropertyScopeOutput)
+        // The first output stream's own latency.
+        var addr = address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeOutput)
+        var size: UInt32 = 0
+        if AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr, size >= UInt32(MemoryLayout<AudioStreamID>.size) {
+            var streams = [AudioStreamID](repeating: 0, count: Int(size) / MemoryLayout<AudioStreamID>.size)
+            if AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &streams) == noErr, let s = streams.first {
+                var a = address(kAudioStreamPropertyLatency)
+                var v = UInt32(0)
+                var sz = UInt32(MemoryLayout<UInt32>.size)
+                if AudioObjectGetPropertyData(s, &a, 0, nil, &sz, &v) == noErr { total += Int(v) }
+            }
+        }
+        return total
+    }
+
+    static func bufferFrames(_ id: AudioDeviceID) -> Int {
+        var addr = address(kAudioDevicePropertyBufferFrameSize)
+        var v = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &v) == noErr ? Int(v) : 0
+    }
+
+    private static func channelName(_ id: AudioDeviceID, _ channel: Int) -> String? {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyElementName,
+                                              mScope: kAudioDevicePropertyScopeOutput, mElement: UInt32(channel))
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectHasProperty(id, &addr),
+              AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr, let value else { return nil }
+        return value.takeRetainedValue() as String
     }
 
     // MARK: Helpers

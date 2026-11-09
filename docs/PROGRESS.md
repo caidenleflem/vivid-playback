@@ -228,3 +228,18 @@ playing), re-check, and can be undone (Playback › Undo Fix, ⌥⌘Z, or Undo i
   goes out as MTC/Art-Net too.
 - Info.plist: Local Network and Microphone usage text (Art-Net/OSC, LTC input).
 - 84 tests pass. Not yet run on hardware: MIDI ports, Art-Net to a console, LTC input.
+
+## 2026-11-09: Dante-ready
+
+Native Dante needs Audinate's licensed SDK, so Dante goes through Dante Virtual Soundcard or a
+Dante interface, which macOS sees as an ordinary audio device. To make that smooth:
+- Dante devices are recognised (name or manufacturer Audinate): "Dante" in the interface list
+  and a Dante card in Audio Output.
+- Channel names from macOS are shown in the master and timecode pickers ("Output 3 · FOH LTC").
+- **Set up for Dante**: master on transmit channels 1–2, timecode on 3, with Dante Controller
+  routing guidance.
+- Sample rate: the card says whether songs match the Dante rate or how many are converted; the
+  checks re-run when the interface changes.
+- Latency: output latency now includes the device latency, safety offset, stream latency and the
+  IO buffer (for every interface), so the clock, MTC and Art-Net line up with the timecode as
+  it's heard. The Dante card shows the figure.

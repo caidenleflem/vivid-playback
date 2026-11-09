@@ -187,7 +187,7 @@ struct ConnectionsView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text("LTC").font(.manrope(17, .semibold)).foregroundStyle(Brand.ink)
-                    Text(routed ? "\(transport.deviceName ?? "Audio") · Output \(channel ?? 0)" : "Choose a timecode output")
+                    Text(routed ? "\(transport.deviceName ?? "Audio") · \(model.devices.first { $0.uid == transport.audio.device?.uid }?.outputLabel(channel ?? 0) ?? "Output \(channel ?? 0)")" : "Choose a timecode output")
                         .font(.manrope(12.5)).foregroundStyle(routed ? Brand.space : Brand.warn).lineLimit(1)
                 }
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(transport.isPlaying || transport.testing))) { _ in
