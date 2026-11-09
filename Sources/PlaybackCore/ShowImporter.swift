@@ -36,7 +36,7 @@ public enum ImportError: Error, CustomStringConvertible, Equatable {
         switch self {
         case .noSheet: return "There's no offset sheet in the folder. Add a CSV or tab-separated export of it."
         case .spreadsheetNeedsExport(let name): return "\(name) can't be read directly. Export it as .xlsx or CSV (in Numbers: File › Export To) and drop the folder again."
-        case .emptySheet(let name): return "\(name) has no songs in it that could be read."
+        case .emptySheet(let names): return "Couldn't find songs with start timecodes in \(names). Check the sheet has a column of start timecodes (HH:MM:SS:FF)."
         case .unreadableSheet(let name): return "\(name) couldn't be opened. Save it again from Excel or Numbers, or export it as CSV."
         }
     }
@@ -71,11 +71,20 @@ public struct ShowImporter: Sendable {
         return out
     }
 
-    /// The sheet to use: a name that says what it is wins ("Tour Offsets.csv"), else the first.
-    static func pickSheet(_ files: [URL]) -> URL? {
-        let sheets = files.filter { sheetExtensions.contains($0.pathExtension.lowercased()) && !$0.lastPathComponent.hasPrefix("~$") }
-        let words = ["offset", "timecode", "tc", "sheet", "setlist", "cue"]
-        return sheets.first { url in words.contains { url.lastPathComponent.lowercased().contains($0) } } ?? sheets.first
+    static func sheetCandidates(_ files: [URL]) -> [URL] {
+        files.filter { sheetExtensions.contains($0.pathExtension.lowercased()) && !$0.lastPathComponent.hasPrefix("~$") }
+    }
+
+    /// The sheet to use: of the sheets in the folder, the one with the most songs that have a
+    /// start timecode (a folder often holds other tabs or exports too). Ties go to the first.
+    static func pickSheet(_ files: [URL], mapping: ColumnMapping?, defaultRate: FrameRate) -> (URL, OffsetSheet)? {
+        var best: (URL, OffsetSheet, Int)?
+        for url in sheetCandidates(files) {
+            guard let sheet = try? readSheet(url, mapping: mapping, defaultRate: defaultRate) else { continue }
+            let score = sheet.rows.filter { $0.start != nil }.count
+            if score > (best?.2 ?? 0) { best = (url, sheet, score) }
+        }
+        return best.map { ($0.0, $0.1) }
     }
 
     /// Reads a CSV, tab-separated or Excel (.xlsx) offset sheet.
@@ -89,35 +98,52 @@ public struct ShowImporter: Sendable {
         return OffsetSheetParser.read(text: text, mapping: mapping, defaultRate: defaultRate)
     }
 
-    public func importFolder(_ folder: URL, name: String? = nil, mapping: ColumnMapping? = nil,
+    /// Imports a show. `sheet` is the sheet the person chose, when they dropped or picked one;
+    /// otherwise the folder is searched. With `scanAudio` false (a sheet dropped from Downloads),
+    /// no audio is matched and every song runs on generated timecode.
+    public func importFolder(_ folder: URL, sheet chosen: URL? = nil, scanAudio: Bool = true, name: String? = nil,
+                             mapping: ColumnMapping? = nil,
                              progress: (@Sendable (ImportStep) -> Void)? = nil) throws -> ImportReport {
         progress?(.scanning)
-        let files = Self.listFiles(in: folder)
-        guard let sheetURL = Self.pickSheet(files) else {
+        let files = scanAudio ? Self.listFiles(in: folder) : []
+        let sheetURL: URL
+        let sheet: OffsetSheet
+        if let chosen {
+            progress?(.readingSheet(chosen.lastPathComponent))
+            sheetURL = chosen
+            sheet = try Self.readSheet(chosen, mapping: mapping, defaultRate: defaultRate)
+        } else if let found = Self.pickSheet(files, mapping: mapping, defaultRate: defaultRate) {
+            progress?(.readingSheet(found.0.lastPathComponent))
+            (sheetURL, sheet) = found
+        } else {
+            let candidates = Self.sheetCandidates(files)
+            if !candidates.isEmpty { throw ImportError.emptySheet(candidates.map(\.lastPathComponent).joined(separator: ", ")) }
             if let xl = files.first(where: { Self.spreadsheetExtensions.contains($0.pathExtension.lowercased()) }) {
                 throw ImportError.spreadsheetNeedsExport(xl.lastPathComponent)
             }
             throw ImportError.noSheet
         }
-        progress?(.readingSheet(sheetURL.lastPathComponent))
-        let sheet = try Self.readSheet(sheetURL, mapping: mapping, defaultRate: defaultRate)
-        let usable = sheet.rows.filter { $0.start != nil }
-        guard !usable.isEmpty else { throw ImportError.emptySheet(sheetURL.lastPathComponent) }
+        let rate = OffsetSheetParser.commonRate(sheet.table, mapping: sheet.mapping, fallback: defaultRate)
+        // Songs with a start, plus numbered songs the sheet gives no timecode (they play without
+        // sending any). A start that can't be read is left out and reported, never guessed.
+        let usable = sheet.rows.filter { $0.start != nil || ($0.number != nil && !$0.startUnreadable) }
+        guard usable.contains(where: { $0.start != nil }) else { throw ImportError.emptySheet(sheetURL.lastPathComponent) }
 
         progress?(.matching)
         let match = FileMatcher.match(rows: usable, files: files)
         var songs: [Song] = []
         for row in usable {
-            guard let start = row.start else { continue }
             let m = match.matches[row.rowIndex]
+            let start = row.start ?? Timecode(frameCount: 0, rate: row.rate ?? rate)
             var length = row.length
-            if length == nil, let end = row.end { length = Double(end.frames(since: start)) / start.rate.framesPerSecond }
-            songs.append(Song(number: row.number, title: row.title, start: start, fileOffset: row.fileOffset ?? 0, length: length,
-                              masterPath: m?.master.map { ShowStore.relativePath(of: $0, in: folder) },
-                              timecodePath: m?.timecode.map { ShowStore.relativePath(of: $0, in: folder) },
-                              notes: row.notes))
+            if length == nil, let end = row.end, row.start != nil { length = Double(end.frames(since: start)) / start.rate.framesPerSecond }
+            var song = Song(number: row.number, title: row.title, start: start, fileOffset: row.fileOffset ?? 0, length: length,
+                            masterPath: m?.master.map { ShowStore.relativePath(of: $0, in: folder) },
+                            timecodePath: row.start == nil ? nil : m?.timecode.map { ShowStore.relativePath(of: $0, in: folder) },
+                            notes: row.notes)
+            if row.start == nil { song.timecodeOff = true }
+            songs.append(song)
         }
-        let rate = songs.first?.rate ?? defaultRate
         var show = Show(name: name ?? folder.lastPathComponent, defaultRate: rate, mediaFolder: folder.standardizedFileURL.path,
                         songs: songs, sheetMapping: sheet.mapping, sheetFile: ShowStore.relativePath(of: sheetURL, in: folder))
 

@@ -327,7 +327,7 @@ final class AppModel: ObservableObject {
     func goTo(timecode text: String) -> String? {
         guard let show else { return "Open a show first." }
         let songs = queue.isEmpty ? show.songs : queue
-        for song in songs {
+        for song in songs where song.hasTimecode {
             guard let tc = Timecode(text, rate: song.rate) else { continue }
             let offset = Double(tc.frames(since: song.start)) / song.rate.framesPerSecond
             if offset >= -song.fileOffset && offset <= (song.length ?? 0) {
@@ -358,12 +358,20 @@ final class AppModel: ObservableObject {
         FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         if url.pathExtension == ShowStore.fileExtension { open(package: url); return }
         let folder = isDir.boolValue ? url : url.deletingLastPathComponent()
+        // A dropped sheet is the sheet. Its folder is searched for audio unless it's a catch-all
+        // folder like Downloads, where other files would only cause wrong matches.
+        let sheetExtensions: Set<String> = ["csv", "tsv", "txt", "xlsx"]
+        let chosen = !isDir.boolValue && sheetExtensions.contains(url.pathExtension.lowercased()) ? url : nil
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let catchAll = [home] + [.downloadsDirectory, .desktopDirectory, .documentDirectory]
+            .compactMap { FileManager.default.urls(for: $0, in: .userDomainMask).first?.standardizedFileURL }
+        let scanAudio = !(chosen != nil && catchAll.contains(folder.standardizedFileURL))
         importState = .running(.scanning)
         let reader = self.reader
         Task {
             do {
                 let report = try await Task.detached(priority: .userInitiated) {
-                    try ShowImporter(reader: reader).importFolder(folder, progress: { step in
+                    try ShowImporter(reader: reader).importFolder(folder, sheet: chosen, scanAudio: scanAudio, progress: { step in
                         Task { @MainActor [weak self] in
                             guard let self else { return }
                             if case .running = self.importState { self.importState = .running(step) }

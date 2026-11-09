@@ -102,7 +102,7 @@ struct FirstRunView: View {
                     checkRow(ok: report.masterCount == n, title: "Masters", detail: "\(report.masterCount) of \(n) matched")
                     checkRow(ok: report.timecodeCount == n, title: "Timecode", detail: "\(report.timecodeCount) of \(n) matched and read")
                     ForEach(report.ambiguities, id: \.self) { checkRow(ok: false, title: "Pick a file", detail: $0) }
-                    ForEach(findings) { checkRow(ok: false, title: $0.title, detail: $0.message) }
+                    ForEach(grouped(findings), id: \.title) { checkRow(ok: false, title: $0.title, detail: $0.detail) }
                     if !report.unmatchedFiles.isEmpty {
                         checkRow(ok: true, neutral: true, title: "Not used",
                                  detail: report.unmatchedFiles.prefix(6).joined(separator: ", ") + (report.unmatchedFiles.count > 6 ? "…" : ""))
@@ -121,8 +121,46 @@ struct FirstRunView: View {
         }
     }
 
+    /// One row per finding, except when several songs share the same one: then one row for them all.
+    private func grouped(_ issues: [ShowIssue]) -> [(title: String, detail: String)] {
+        var rows: [(title: String, detail: String)] = []
+        var seen = Set<ShowIssue.Kind>()
+        for issue in issues {
+            let same = issues.filter { $0.kind == issue.kind }
+            if same.count < 3 {
+                rows.append((issue.title, issue.message))
+            } else if !seen.contains(issue.kind) {
+                seen.insert(issue.kind)
+                let names = same.compactMap { i in report?.show.songs.first { $0.id == i.songID }?.title }
+                let list = names.prefix(5).joined(separator: ", ") + (names.count > 5 ? " and \(names.count - 5) more" : "")
+                rows.append(("\(same.count) songs \(phrase(issue.kind))", list))
+            }
+        }
+        return rows
+    }
+
+    private var report: ImportReport? {
+        if case .finished(let r) = model.importState { return r }
+        return nil
+    }
+
+    private func phrase(_ kind: ShowIssue.Kind) -> String {
+        switch kind {
+        case .missingMaster: return "have no master matched"
+        case .missingTimecode: return "use timecode generated from the sheet"
+        case .duplicateStart: return "share a start timecode with another song"
+        case .overlap: return "run into the next song's timecode"
+        case .startMismatch: return "have timecode that doesn't match the sheet"
+        case .rateMismatch: return "have a different frame rate from the sheet"
+        default: return "need a look"
+        }
+    }
+
     private func summary(_ report: ImportReport) -> String {
         let n = report.show.songs.count
+        if report.masterCount == 0 {
+            return "\(n) songs read. No audio was found next to the sheet, so it runs timecode only. Drop the whole show folder to add the masters."
+        }
         let ready = report.readyCount
         if ready == n { return n == 1 ? "1 song ready." : "All \(n) songs ready." }
         let review = n - ready

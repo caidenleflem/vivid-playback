@@ -138,6 +138,7 @@ extension PlaybackBuffers {
     /// the master. The caller shows that it's generated; it's never silent.
     public static func prepare(song: Song, sampleRate: Double, master: [[Float]], timecode: [Float]?) -> PlaybackBuffers {
         if let timecode { return PlaybackBuffers(sampleRate: sampleRate, master: master, timecode: timecode) }
+        if !song.hasTimecode { return PlaybackBuffers(sampleRate: sampleRate, master: master, timecode: nil) }
         let frames = master.map(\.count).max() ?? 0
         return PlaybackBuffers(sampleRate: sampleRate, master: master,
                                timecode: generatedTimecode(for: song, sampleRate: sampleRate, frames: frames),

@@ -109,6 +109,8 @@ public struct SheetRow: Equatable, Sendable {
     public var masterFile: String?
     public var timecodeFile: String?
     public var notes: String?
+    /// The start cell had something in it that isn't a timecode.
+    public var startUnreadable = false
 }
 
 public struct OffsetSheet: Sendable {
@@ -274,6 +276,10 @@ public enum OffsetSheetParser {
             let title = cell(.title)
             let startText = cell(.start)
             if title == nil && startText == nil { continue }
+            // With a number column, a row with no number and no start is a note or a total
+            // ("Main show 100 min · 27 songs"), not a song.
+            if mapping.columns[.number] != nil && startText == nil,
+               cell(.number).flatMap({ Int($0.filter(\.isNumber)) }) == nil { continue }
             let rowLabel = "Row \(index + 1)"
             var rate = defaultRate
             if let r = cell(.rate) {
@@ -285,9 +291,10 @@ public enum OffsetSheetParser {
             if let n = cell(.number) { row.number = Int(n.filter(\.isNumber)) }
             if let s = startText {
                 row.start = Timecode(s, rate: rate)
+                row.startUnreadable = row.start == nil
                 if row.start == nil { problems.append("\(rowLabel) (\(row.title)): couldn't read the start timecode “\(s)”.") }
             } else {
-                problems.append("\(rowLabel) (\(row.title)): no start timecode.")
+                problems.append("\(rowLabel) (\(row.title)): no timecode on the sheet, so it plays without sending timecode.")
             }
             if let e = cell(.end) {
                 row.end = Timecode(e, rate: rate)

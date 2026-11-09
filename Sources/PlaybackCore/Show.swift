@@ -27,6 +27,9 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     public var timecodePath: String?
     /// Which channel of the timecode file holds the LTC (0-based), as found on import.
     public var timecodeFileChannel: Int?
+    /// True for songs the sheet lists with no timecode (a looped bed, an interstitial):
+    /// they play, but send no timecode. `start` is then only a placeholder.
+    public var timecodeOff: Bool?
     public var notes: String?
     public var markers: [Marker]
 
@@ -47,6 +50,7 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var rate: FrameRate { start.rate }
+    public var hasTimecode: Bool { timecodeOff != true }
 
     public var end: Timecode? {
         guard let length else { return nil }

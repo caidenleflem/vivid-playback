@@ -46,7 +46,7 @@ struct LiveClock: View {
             let color = transport.isPlaying ? Brand.gold : Brand.ink
             if let song = model.currentSong {
                 let position = transport.position(at: CACurrentMediaTime())
-                let tc = songTime
+                let tc = (songTime || !song.hasTimecode)
                     ? Timecode(frameCount: Int(max(0, position) * song.rate.framesPerSecond), rate: song.rate)
                     : model.timecode(for: song, at: position)
                 ClockText(timecode: tc, size: size, weight: weight, color: color)
@@ -81,8 +81,12 @@ struct StateChips: View {
             Chip(transport.isPlaying ? "Rolling" : "Stopped") {
                 StatusDot(color: transport.isPlaying ? Brand.gold : Brand.graphite, pulsing: transport.isPlaying)
             }
-            if let song = model.currentSong { Chip(song.rate.displayName) }
-            outputChip
+            if let song = model.currentSong, song.hasTimecode { Chip(song.rate.displayName) }
+            if let song = model.currentSong, !song.hasTimecode {
+                Chip("No timecode for this song · song time") { StatusDot(color: Brand.graphite) }
+            } else {
+                outputChip
+            }
             if transport.loop != nil { Chip("Looping") { Image(systemName: "repeat").font(.system(size: 10, weight: .bold)).foregroundStyle(Brand.gold) } }
             if model.locked { Chip("Show mode") { Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(Brand.gold) } }
         }

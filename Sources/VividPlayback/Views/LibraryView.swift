@@ -384,12 +384,12 @@ struct SongList: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(song.start.description).frame(width: 150, alignment: .leading)
+            Text(song.hasTimecode ? song.start.description : "—").frame(width: 150, alignment: .leading)
             Text(song.length.map(TimeFormat.clock) ?? "—").frame(width: 84, alignment: .leading)
-            Text(song.rate.shortName).frame(width: 80, alignment: .leading)
+            Text(song.hasTimecode ? song.rate.shortName : "—").frame(width: 80, alignment: .leading)
             HStack(spacing: 8) {
                 StatusDot(color: skipped ? Brand.graphite : statusColor(issues))
-                Text(skipped ? "Skipped tonight" : statusText(issues)).lineLimit(1)
+                Text(skipped ? "Skipped tonight" : (issues.isEmpty && !song.hasTimecode ? "Ready · no timecode" : statusText(issues))).lineLimit(1)
             }
             .frame(width: 180, alignment: .leading)
         }

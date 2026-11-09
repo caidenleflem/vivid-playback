@@ -119,7 +119,7 @@ final class Transport: ObservableObject {
         guard audio.isRunning else {
             buffers = nil
             audio.state.buffers = nil
-            timecodeGenerated = song.timecodePath == nil
+            timecodeGenerated = song.hasTimecode && song.timecodePath == nil
             locate(position)
             if play { self.play() }
             return

@@ -159,7 +159,7 @@ struct SetlistEditor: View {
                                 Text(song.title).font(.manrope(13.5, .semibold))
                                     .foregroundStyle((draft?.skipped.contains(id) ?? false) ? Brand.graphite : Brand.ink)
                                 Spacer()
-                                Text(song.start.description).font(.manrope(12).monospacedDigit()).foregroundStyle(Brand.space)
+                                Text(song.hasTimecode ? song.start.description : "No timecode").font(.manrope(12).monospacedDigit()).foregroundStyle(Brand.space)
                             }
                             .padding(.vertical, 2)
                         }

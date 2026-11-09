@@ -92,3 +92,28 @@
 **Needs Caiden**
 - A run on the real interface: confirm the console reads timecode and that it lines up.
 - A real offset sheet, to tune the column detection.
+
+## 2026-11-09: the first real tour sheet
+
+Caiden's Fall EU '26 sheet (a Google Sheets "Songs" tab as CSV) failed to import. The sheet
+itself parsed (header on row 4, "LTC start" column, durations), but:
+- The importer chose the sheet by file name keywords, so in a folder with other CSV exports
+  (or a CSV dropped in Downloads) it read the wrong file and found no songs.
+- Numbered songs with no LTC (looped beds, the pre-encore) were dropped.
+
+**Fixed**
+- A dropped or chosen sheet is always the sheet. Otherwise every sheet in the folder is read
+  and the one with the most start timecodes wins.
+- A sheet dropped from Downloads, Desktop, Documents or the home folder isn't used to search
+  that folder for audio; the show runs on generated timecode until the show folder is dropped.
+- Numbered rows with no start become songs that play without timecode (`timecodeOff`); the
+  clock shows song time for them. A start that's there but unreadable is still reported and
+  left out, never turned into a no-timecode song.
+- Totals and note rows (no number, no start) are ignored.
+- Repeated findings are grouped on the import screen ("39 songs use timecode generated from
+  the sheet").
+- Tests built on the real sheet's layout (made-up song names). 51 tests pass.
+
+**Noticed on the sheet (reported by the app as warnings, not changed)**
+- Intros share their song's address (00:20:00:00, 01:50:00:00).
+- 04:30:00:00 is a cue row ("NOT A SONG").

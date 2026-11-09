@@ -51,12 +51,12 @@ public enum ShowValidator {
 
         for e in files.readErrors { add(.error, .unreadableFile, "\(name) has a file that can't be read", e) }
         if song.masterPath == nil { add(.error, .missingMaster, "\(name) has no master", "No master file is matched to \(name) yet.") }
-        if song.timecodePath == nil {
+        if song.hasTimecode && song.timecodePath == nil {
             add(.warning, .missingTimecode, "\(name) uses generated timecode",
                 "No timecode file is matched to \(name), so timecode is generated from the sheet, starting at \(song.start). Add a timecode file if the console expects a specific one.")
         }
 
-        if let a = files.analysis, let tcInfo = files.timecode {
+        if song.hasTimecode, let a = files.analysis, let tcInfo = files.timecode {
             if !a.hasTimecode {
                 add(.error, .noTimecodeFound, "\(name): no timecode found", "The timecode file has no readable LTC in it. Check it's the right file.")
             } else {
@@ -92,11 +92,11 @@ public enum ShowValidator {
         if let m = files.master, let t = files.timecode {
             let frame = 1.0 / song.rate.framesPerSecond
             let diff = m.duration - t.duration
-            if abs(diff) > frame {
+            if song.hasTimecode && abs(diff) > frame {
                 add(.warning, .lengthMismatch, "\(name): files are different lengths",
                     "The master is \(TimeFormat.clock(m.duration)) and the timecode file is \(TimeFormat.clock(t.duration)) (\(String(format: "%.2f", abs(diff))) s apart).")
             }
-            if m.sampleRate != t.sampleRate {
+            if song.hasTimecode && m.sampleRate != t.sampleRate {
                 add(.error, .sampleRateMismatch, "\(name): sample rates differ",
                     "The master is \(Int(m.sampleRate)) Hz and the timecode file is \(Int(t.sampleRate)) Hz. Export both at the same rate so they stay locked.")
             }
@@ -111,7 +111,7 @@ public enum ShowValidator {
     /// Checks across songs: songs whose timecode ranges overlap, and duplicate starts.
     public static func validate(show: Show) -> [ShowIssue] {
         var issues: [ShowIssue] = []
-        let sorted = show.songs.sorted { $0.start.seconds < $1.start.seconds }
+        let sorted = show.songs.filter(\.hasTimecode).sorted { $0.start.seconds < $1.start.seconds }
         for (a, b) in zip(sorted, sorted.dropFirst()) {
             if a.start.seconds == b.start.seconds {
                 issues.append(ShowIssue(severity: .warning, kind: .duplicateStart, songID: b.id, title: "\(a.title) and \(b.title) start at the same timecode",

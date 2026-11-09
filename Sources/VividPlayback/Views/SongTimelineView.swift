@@ -73,14 +73,18 @@ struct SongTimelineView: View {
                     .foregroundStyle(Brand.ink)
                     .matchedGeometryEffect(id: "title", in: morph)
                 HStack(spacing: 8) {
-                    Chip(song.end.map { "\(song.start) → \($0)" } ?? song.start.description).monospacedDigit()
-                    Chip(song.rate.displayName)
+                    if song.hasTimecode {
+                        Chip(song.end.map { "\(song.start) → \($0)" } ?? song.start.description).monospacedDigit()
+                        Chip(song.rate.displayName)
+                    } else {
+                        Chip("No timecode · plays audio only") { StatusDot(color: Brand.graphite) }
+                    }
                     if song.fileOffset != 0 { Chip(String(format: "Offset %+.3f s", song.fileOffset)) }
                     let issues = model.issues(for: song).filter { $0.kind != .missingTimecode }
                     if transport.timecodeGenerated {
                         Chip("Timecode generated from the sheet") { StatusDot(color: Brand.gold) }
                     }
-                    if issues.isEmpty && !transport.timecodeGenerated {
+                    if issues.isEmpty && !transport.timecodeGenerated && song.hasTimecode {
                         Chip("Timecode verified") { StatusDot(color: Brand.ok) }
                     } else if !issues.isEmpty {
                         Button { model.issuesShown = true } label: {
@@ -226,9 +230,9 @@ struct TimelinePanel: View {
 
     private var timecodeLane: some View {
         HStack {
-            Text(song.start.description)
+            Text(song.hasTimecode ? song.start.description : "No timecode for this song")
             Spacer()
-            Text(song.end?.description ?? "")
+            Text(song.hasTimecode ? (song.end?.description ?? "") : "")
         }
         .font(.manrope(10.5, .semibold).monospacedDigit())
         .foregroundStyle(Brand.ink)
