@@ -122,6 +122,10 @@ final class AppModel: ObservableObject {
     /// Every saved show, for the Albums page.
     @Published var library: [ShowLibrary.Entry] = []
     @Published var showInfoShown = false
+    /// Leave skipped songs out of the list entirely.
+    @Published var hideSkipped = UserDefaults.standard.bool(forKey: "hideSkipped") {
+        didSet { UserDefaults.standard.set(hideSkipped, forKey: "hideSkipped") }
+    }
     /// The notice offers Undo (for the fix it reports).
     @Published var noticeOffersUndo = false
 
@@ -162,7 +166,8 @@ final class AppModel: ObservableObject {
     /// The setlist's songs as the list shows them (sorted for viewing, or in setlist order).
     var visibleSongs: [Song] {
         guard let show, let setlist else { return setlistSongs }
-        return setlist.songIDs(sortedBy: sort, in: show).compactMap(show.song(id:))
+        let ids = setlist.songIDs(sortedBy: sort, in: show).filter { !(hideSkipped && setlist.skipped.contains($0)) }
+        return ids.compactMap(show.song(id:))
     }
 
     func refreshLibrary() {
@@ -194,6 +199,16 @@ final class AppModel: ObservableObject {
     func moveSongs(_ ids: [UUID], before target: UUID?) {
         guard sort == .setlist else { post("Switch the list back to setlist order to move songs."); return }
         editSetlist { $0.move(ids, before: target) }
+    }
+
+    func removeFromSetlist(_ song: Song) {
+        guard !(transport.isPlaying && currentSong?.id == song.id) else {
+            post("\(song.title) is playing. Stop it before taking it out of the setlist.")
+            return
+        }
+        let name = setlist?.name ?? "the setlist"
+        editSetlist { $0.remove(song.id) }
+        post("\(song.title) is out of \(name). It's still in the show: add it back in Edit Setlist.")
     }
 
     func moveUp(_ song: Song) { guard sort == .setlist else { return }; editSetlist { $0.moveUp(song.id) } }

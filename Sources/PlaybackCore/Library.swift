@@ -63,6 +63,18 @@ extension Setlist {
         songIDs = rest
     }
 
+    /// Takes a song out of this setlist (it stays in the show and in other setlists).
+    public mutating func remove(_ id: UUID) {
+        songIDs.removeAll { $0 == id }
+        skipped.remove(id)
+    }
+
+    /// Puts a song back at the end of this setlist.
+    public mutating func add(_ id: UUID) {
+        guard !songIDs.contains(id) else { return }
+        songIDs.append(id)
+    }
+
     public mutating func moveUp(_ id: UUID) {
         guard let i = songIDs.firstIndex(of: id), i > 0 else { return }
         songIDs.swapAt(i, i - 1)

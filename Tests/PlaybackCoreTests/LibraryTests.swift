@@ -42,6 +42,21 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(list.songIDs.first, ids[1], "already at the top stays put")
     }
 
+    func testRemoveAndAddBack() {
+        let s = show()
+        var list = s.setlists[0]
+        let id = list.songIDs[1]
+        list.skipped.insert(id)
+        list.remove(id)
+        XCTAssertFalse(list.songIDs.contains(id))
+        XCTAssertFalse(list.skipped.contains(id))
+        XCTAssertNotNil(s.song(id: id), "still in the show")
+        list.add(id)
+        list.add(id)
+        XCTAssertEqual(list.songIDs.last, id)
+        XCTAssertEqual(list.songIDs.filter { $0 == id }.count, 1)
+    }
+
     func testArtistAndPartsComeFromTheSheet() throws {
         let sheet = OffsetSheetParser.read(text: RealSheetTests.csv)
         XCTAssertEqual(sheet.artistAndShow?.artist, "EXAMPLE ARTIST")

@@ -142,7 +142,7 @@ struct SetlistEditor: View {
     @State private var draft: Setlist?
 
     var body: some View {
-        SheetFrame(title: "Edit setlist", subtitle: "Drag to reorder. Untick a song to skip it tonight; it stays in the list.") {
+        SheetFrame(title: "Edit setlist", subtitle: "Drag to reorder. Untick a song to skip it tonight. Songs taken out of this setlist are listed at the bottom to add back.") {
             if let show = model.show, let binding = Binding($draft) {
                 TextField("Setlist name", text: binding.name)
                     .textFieldStyle(.roundedBorder)
@@ -165,8 +165,26 @@ struct SetlistEditor: View {
                         }
                     }
                     .onMove { from, to in draft?.songIDs.move(fromOffsets: from, toOffset: to) }
+                    .onDelete { offsets in
+                        let ids = offsets.compactMap { draft?.songIDs[$0] }
+                        ids.forEach { draft?.remove($0) }
+                    }
+                    let missing = show.songs.filter { !(draft?.songIDs.contains($0.id) ?? true) }
+                    if !missing.isEmpty {
+                        Section("Not in this setlist") {
+                            ForEach(missing) { song in
+                                HStack(spacing: 12) {
+                                    SongArt(song: song).frame(width: 26, height: 26)
+                                    Text(song.title).font(.manrope(13.5, .semibold)).foregroundStyle(Brand.space)
+                                    Spacer()
+                                    Button("Add") { draft?.add(song.id) }.buttonStyle(QuietButtonStyle())
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
                 }
-                .frame(height: 320)
+                .frame(height: 360)
                 HStack {
                     Button("Duplicate") { save(); if let d = draft { model.duplicateSetlist(d) }; draft = model.setlist }
                     Button("New from all songs") { save(); model.newSetlist(); draft = model.setlist }

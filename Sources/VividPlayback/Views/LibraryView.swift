@@ -397,6 +397,8 @@ struct SongList: View {
                     ForEach(SetlistSort.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.inline)
+                Divider()
+                Toggle("Hide Skipped Songs", isOn: $model.hideSkipped)
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.up.arrow.down").font(.system(size: 10, weight: .semibold))
@@ -536,6 +538,7 @@ struct SongList: View {
             if song.timecodePath != nil { Button("Remove Timecode File") { model.removeFile(.timecode, from: song) }.disabled(model.locked) }
             Divider()
             Button(skipped ? "Play Tonight" : "Skip Tonight") { model.toggleSkip(song) }.disabled(model.locked)
+            Button("Remove from Setlist") { model.removeFromSetlist(song) }.disabled(model.locked)
         }
     }
 

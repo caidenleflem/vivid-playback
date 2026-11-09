@@ -205,3 +205,6 @@ playing), re-check, and can be undone (Playback › Undo Fix, ⌥⌘Z, or Undo i
   editable in Show Info… (⌘I, or double-click the show name in the sidebar).
 - Shows imported before this keep working; re-import to pick up acts, or set the artist in Show Info.
 - 70 tests pass.
+- Hiding songs: Sort menu › **Hide Skipped Songs** leaves skipped songs out of the list (kept
+  per Mac). Right-click › **Remove from Setlist** takes a song out of that setlist only (not while
+  it's playing); Edit Setlist lists "Not in this setlist" songs with **Add**. 71 tests pass.
