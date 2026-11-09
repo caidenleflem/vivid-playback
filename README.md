@@ -32,7 +32,8 @@ folder: `./scripts/make-dmg.sh`. The installer lands in `build/`.
 - **Try the example show** to see it work before you have files to hand.
 - **Add audio after importing:** drop files or a folder on the song list and they're matched to
   the songs still missing them (never replacing a file a song already has). Drop one file on a
-  song to give it that file: "LTC", "TC" or "timecode" in the name makes it the timecode file.
+  song to give it that file: the app listens for LTC in it, so a timecode file is recognised
+  whatever it's called (the name only decides when a file can't be read).
   Or right-click a song, or use the file names in the song timeline, to choose, replace or
   remove its master or timecode file. **File › Add Audio Files…** (⇧⌘A) does the same from a
   picker. A timecode file given to a song the sheet left without timecode sets its start from
@@ -42,6 +43,11 @@ Keys: **Space** play or pause · **← →** previous and next song · **⌘←*
 **Return** or **⌘T** song timeline · **M** add a marker · **L** loop between markers ·
 **⌘G** go to timecode · **⇧⌘F** full-screen clock · **Esc** back to the library ·
 **⌥⌘O** audio output · **⇧⌘E** edit setlist · **⇧⌘L** show mode · **⇧⌘I** things to check.
+
+**Timecode:** a song with a timecode file sends that file, exactly as recorded, and the big
+clock shows the timecode read from it (what the console receives). Only a song with no
+timecode file gets timecode generated from the sheet, and the chip says which. If a timecode
+file can't be read, no timecode is sent and a red chip says so; it never substitutes.
 
 **Audio output:** pick the interface, the master outputs (a stereo pair, or one output in mono)
 and the timecode output. On a two-output Mac, put the master on Output 1 (mono) and timecode on

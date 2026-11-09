@@ -46,9 +46,10 @@ struct LiveClock: View {
             let color = transport.isPlaying ? Brand.gold : Brand.ink
             if let song = model.currentSong {
                 let position = transport.position(at: CACurrentMediaTime())
+                // Show TC is what's actually going out (the file's own LTC when there is one).
                 let tc = (songTime || !song.hasTimecode)
                     ? Timecode(frameCount: Int(max(0, position) * song.rate.framesPerSecond), rate: song.rate)
-                    : model.timecode(for: song, at: position)
+                    : transport.outputTimecode(for: song)
                 ClockText(timecode: tc, size: size, weight: weight, color: color)
             } else {
                 ClockText(timecode: nil, size: size, weight: weight, color: Brand.graphite)
@@ -87,8 +88,27 @@ struct StateChips: View {
             } else {
                 outputChip
             }
+            if let problem = transport.masterProblem {
+                Chip("Master can't be read") { StatusDot(color: Color(hex: 0xE5675A)) }.help(problem)
+            }
             if transport.loop != nil { Chip("Looping") { Image(systemName: "repeat").font(.system(size: 10, weight: .bold)).foregroundStyle(Brand.gold) } }
             if model.locked { Chip("Show mode") { Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(Brand.gold) } }
+        }
+    }
+
+    private var sourceLabel: String {
+        switch transport.source {
+        case .file: return "Timecode out · from file"
+        case .generated: return "Timecode out · generated from the sheet"
+        default: return "Timecode out"
+        }
+    }
+
+    private var sourceHelp: String {
+        switch transport.source {
+        case .file(let name): return "Playing the timecode in \(name). The clock shows the timecode read from that file."
+        case .generated: return "This song has no timecode file, so timecode is generated from the sheet's start."
+        default: return "Timecode is going out on its own output."
         }
     }
 
@@ -97,11 +117,20 @@ struct StateChips: View {
         case .playing, .lost:
             if !transport.audio.isRunning {
                 Chip("No audio output") { StatusDot(color: Color(hex: 0xE5675A)) }
+            } else if case .unreadable(let why) = transport.source {
+                Button { model.issuesShown = true } label: {
+                    Chip("Timecode file can't be read · no timecode sent") { StatusDot(color: Color(hex: 0xE5675A)) }
+                }
+                .buttonStyle(.plain)
+                .help(why)
+            } else if case .file(let name) = transport.source, !transport.trackFound, !transport.isLoading {
+                Chip("No timecode found in \(name)") { StatusDot(color: Color(hex: 0xE5675A)) }
+                    .help("The file plays, but there's no readable LTC in it. Check it's the right file.")
             } else if transport.timecodeRouted {
-                Chip(transport.timecodeGenerated ? "Timecode out · generated" : "Timecode out") {
+                Chip(sourceLabel) {
                     StatusDot(color: transport.isPlaying ? Brand.ok : Brand.graphite, pulsing: transport.isPlaying)
                 }
-                .help(transport.timecodeGenerated ? "This song has no timecode file, so timecode is generated from the sheet." : "Timecode is going out on its own output.")
+                .help(sourceHelp)
             } else {
                 Button { model.outputShown = true } label: {
                     Chip("Choose a timecode output") { StatusDot(color: Brand.warn) }

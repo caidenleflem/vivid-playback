@@ -81,8 +81,19 @@ struct SongTimelineView: View {
                     }
                     if song.fileOffset != 0 { Chip(String(format: "Offset %+.3f s", song.fileOffset)) }
                     let issues = model.issues(for: song).filter { $0.kind != .missingTimecode }
-                    if transport.timecodeGenerated {
+                    switch transport.source {
+                    case .generated:
                         Chip("Timecode generated from the sheet") { StatusDot(color: Brand.gold) }
+                    case .file(let name):
+                        if transport.trackFound, let first = transport.firstFileTimecode {
+                            Chip("Timecode from \(name) · starts \(first)") { StatusDot(color: Brand.ok) }
+                        } else if !transport.isLoading {
+                            Chip("No timecode found in \(name)") { StatusDot(color: Color(hex: 0xE5675A)) }
+                        }
+                    case .unreadable(let why):
+                        Chip("Timecode file can't be read") { StatusDot(color: Color(hex: 0xE5675A)) }.help(why)
+                    case .none:
+                        EmptyView()
                     }
                     if issues.isEmpty && !transport.timecodeGenerated && song.hasTimecode {
                         Chip("Timecode verified") { StatusDot(color: Brand.ok) }
@@ -316,7 +327,7 @@ struct TimelinePanel: View {
 
     private func playhead(position: Double, height: CGFloat) -> some View {
         VStack(spacing: 0) {
-            Text(model.timecode(for: song, at: position).description)
+            Text((transport.outputTimecode(for: song) ?? (song.hasTimecode ? nil : Timecode(frameCount: Int(max(0, position) * song.rate.framesPerSecond), rate: song.rate)))?.description ?? "--:--:--:--")
                 .font(.manrope(11, .bold).monospacedDigit())
                 .foregroundStyle(Color(hex: 0x120D05))
                 .padding(.horizontal, 7).padding(.vertical, 2)

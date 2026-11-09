@@ -20,6 +20,16 @@ public protocol AudioFileReading: Sendable {
     func info(of url: URL) throws -> AudioFileInfo
     /// One array of samples per channel.
     func readChannels(of url: URL) throws -> (sampleRate: Double, channels: [[Float]])
+    /// The first `seconds` of each channel (readers that can, read only that much).
+    func readChannels(of url: URL, seconds: Double) throws -> (sampleRate: Double, channels: [[Float]])
+}
+
+extension AudioFileReading {
+    public func readChannels(of url: URL, seconds: Double) throws -> (sampleRate: Double, channels: [[Float]]) {
+        let all = try readChannels(of: url)
+        let n = Int(seconds * all.sampleRate)
+        return (all.sampleRate, all.channels.map { Array($0.prefix(n)) })
+    }
 }
 
 public enum AudioFileError: Error, Equatable, CustomStringConvertible {

@@ -13,12 +13,22 @@ struct AVAudioFileReader: AudioFileReading {
     }
 
     func readChannels(of url: URL) throws -> (sampleRate: Double, channels: [[Float]]) {
+        try readChannels(of: url, frames: nil)
+    }
+
+    func readChannels(of url: URL, seconds: Double) throws -> (sampleRate: Double, channels: [[Float]]) {
+        let file = try AVAudioFile(forReading: url)
+        return try readChannels(of: url, frames: AVAudioFrameCount(max(1, seconds * file.processingFormat.sampleRate)))
+    }
+
+    private func readChannels(of url: URL, frames limit: AVAudioFrameCount?) throws -> (sampleRate: Double, channels: [[Float]]) {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length)) else {
+        let count = min(AVAudioFrameCount(file.length), limit ?? AVAudioFrameCount(file.length))
+        guard count > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else {
             throw AudioFileError.unreadable(url.lastPathComponent)
         }
-        try file.read(into: buffer)
+        try file.read(into: buffer, frameCount: count)
         guard let data = buffer.floatChannelData else { throw AudioFileError.unreadable(url.lastPathComponent) }
         let n = Int(buffer.frameLength)
         let channels = (0..<Int(format.channelCount)).map { Array(UnsafeBufferPointer(start: data[$0], count: n)) }
@@ -348,7 +358,7 @@ final class AppModel: ObservableObject {
     /// Matches files (or whole folders) to the songs still missing a master or timecode file.
     func addAudio(_ urls: [URL]) {
         guard !locked, var show else { return }
-        let result = ShowImporter.attach(ShowImporter.expand(urls), to: &show)
+        let result = ShowImporter.attach(ShowImporter.expand(urls), to: &show, reader: reader)
         self.show = show
         save()
         filesChanged()
@@ -385,7 +395,8 @@ final class AppModel: ObservableObject {
             let updated = try ShowImporter.assign(url, role: role, songID: song.id, in: &show, reader: reader)
             self.show = show
             save()
-            filesChanged()
+            filesChanged(song)
+            if transport.isPlaying && currentSong?.id == song.id { return }
             if role == .timecode, !song.hasTimecode, let u = updated {
                 post("\(u.title) now sends timecode, starting at \(u.start) (read from \(url.lastPathComponent)).")
             } else {
@@ -406,14 +417,27 @@ final class AppModel: ObservableObject {
 
     /// After files change: drop cached audio and waveforms, reload the cued song if it isn't
     /// playing (never mid-song), and check everything again.
-    private func filesChanged() {
+    private func filesChanged(_ changed: Song? = nil) {
         guard let show else { return }
         transport.invalidateCache()
         waveforms = [:]
         if let song = currentSong {
-            if transport.isPlaying { transport.update(song, in: show) } else { cue(song, play: false) }
+            if transport.isPlaying {
+                transport.update(song, in: show)
+                if changed == nil || changed?.id == song.id {
+                    post("\(song.title) keeps playing what it had. The new file is used the next time it's cued.")
+                }
+            } else {
+                cue(song, play: false)
+            }
         }
         recheck()
+    }
+
+    /// Drop of a single file on a song: listen for LTC to decide if it's the timecode file.
+    func dropFile(_ url: URL, on song: Song) {
+        let role = ShowImporter.detectRole(url, reader: reader)
+        assign(url, role: role == .timecode ? .timecode : .master, to: song)
     }
 
     func post(_ text: String) {

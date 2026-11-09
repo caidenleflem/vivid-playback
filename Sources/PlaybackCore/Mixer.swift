@@ -34,6 +34,18 @@ public struct OutputMap: Equatable, Sendable {
 /// One song's audio, ready to play: the master (one or two channels) and the timecode track,
 /// at the interface's sample rate, sample-aligned (sample n of each belongs together).
 /// Allocated once when the song is loaded; the realtime thread only reads it.
+/// Where a song's timecode comes from, as shown to the person.
+public enum TimecodeSource: Equatable, Sendable {
+    /// Played straight from the song's timecode file.
+    case file(String)
+    /// The song has no timecode file: generated from the sheet's start.
+    case generated
+    /// The sheet gives the song no timecode: none is sent.
+    case none
+    /// The song has a timecode file that couldn't be read: none is sent, never a substitute.
+    case unreadable(String)
+}
+
 public final class PlaybackBuffers: @unchecked Sendable {
     public let sampleRate: Double
     public let frameCount: Int
@@ -41,15 +53,24 @@ public final class PlaybackBuffers: @unchecked Sendable {
     let master: UnsafeMutablePointer<Float>   // channel-major: [ch0 frames][ch1 frames]
     let timecode: UnsafeMutablePointer<Float>?
     /// True when the timecode was generated from the sheet rather than read from a file.
-    public let timecodeGenerated: Bool
+    public var timecodeGenerated: Bool { source == .generated }
+    public let source: TimecodeSource
+    /// The timecode actually on the track (file timecode only), for the clock.
+    public let ltc: LTCTrack?
 
-    public init(sampleRate: Double, master: [[Float]], timecode: [Float]?, timecodeGenerated: Bool = false) {
+    public convenience init(sampleRate: Double, master: [[Float]], timecode: [Float]?, timecodeGenerated: Bool = false) {
+        self.init(sampleRate: sampleRate, master: master, timecode: timecode,
+                  source: timecodeGenerated ? .generated : (timecode == nil ? .none : .file("")), ltc: nil)
+    }
+
+    public init(sampleRate: Double, master: [[Float]], timecode: [Float]?, source: TimecodeSource, ltc: LTCTrack?) {
         self.sampleRate = sampleRate
         let channels = Array(master.prefix(2))
         let frames = max(channels.map(\.count).max() ?? 0, timecode?.count ?? 0)
         self.frameCount = frames
         self.masterChannels = max(1, channels.count)
-        self.timecodeGenerated = timecodeGenerated
+        self.source = source
+        self.ltc = ltc
         let m = UnsafeMutablePointer<Float>.allocate(capacity: max(1, frames * masterChannels))
         m.initialize(repeating: 0, count: max(1, frames * masterChannels))
         for (c, ch) in channels.enumerated() {
@@ -136,13 +157,24 @@ extension PlaybackBuffers {
     /// Builds a song's buffers. With no timecode file, the timecode is generated from the
     /// sheet: the frame that reads `song.start` begins exactly `song.fileOffset` seconds into
     /// the master. The caller shows that it's generated; it's never silent.
-    public static func prepare(song: Song, sampleRate: Double, master: [[Float]], timecode: [Float]?) -> PlaybackBuffers {
-        if let timecode { return PlaybackBuffers(sampleRate: sampleRate, master: master, timecode: timecode) }
-        if !song.hasTimecode { return PlaybackBuffers(sampleRate: sampleRate, master: master, timecode: nil) }
+    ///
+    /// A song with a timecode file never gets generated timecode: if the file couldn't be read
+    /// (`timecodeFileProblem`), no timecode is sent and the problem is shown instead.
+    public static func prepare(song: Song, sampleRate: Double, master: [[Float]], timecode: [Float]?,
+                               timecodeFile: String? = nil, timecodeFileProblem: String? = nil) -> PlaybackBuffers {
+        if let timecode {
+            let track = LTCTrack(samples: timecode, sampleRate: sampleRate, expectedRate: song.rate)
+            return PlaybackBuffers(sampleRate: sampleRate, master: master, timecode: timecode,
+                                   source: .file(timecodeFile ?? ""), ltc: track)
+        }
+        if let problem = timecodeFileProblem {
+            return PlaybackBuffers(sampleRate: sampleRate, master: master, timecode: nil, source: .unreadable(problem), ltc: nil)
+        }
+        if !song.hasTimecode { return PlaybackBuffers(sampleRate: sampleRate, master: master, timecode: nil, source: .none, ltc: nil) }
         let frames = master.map(\.count).max() ?? 0
         return PlaybackBuffers(sampleRate: sampleRate, master: master,
                                timecode: generatedTimecode(for: song, sampleRate: sampleRate, frames: frames),
-                               timecodeGenerated: true)
+                               source: .generated, ltc: nil)
     }
 
     public static func generatedTimecode(for song: Song, sampleRate: Double, frames: Int) -> [Float] {

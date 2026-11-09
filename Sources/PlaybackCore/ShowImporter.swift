@@ -130,7 +130,7 @@ public struct ShowImporter: Sendable {
         guard usable.contains(where: { $0.start != nil }) else { throw ImportError.emptySheet(sheetURL.lastPathComponent) }
 
         progress?(.matching)
-        let match = FileMatcher.match(rows: usable, files: files)
+        let match = FileMatcher.match(rows: usable, files: files, roles: Self.detectRoles(files, reader: reader))
         var songs: [Song] = []
         for row in usable {
             let m = match.matches[row.rowIndex]

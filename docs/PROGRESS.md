@@ -129,3 +129,21 @@ Caiden asked whether masters and LTC files can be added once a sheet is imported
   (and says so); a file with no LTC is refused and nothing changes.
 - Files outside the show folder keep their full path. Nothing reloads mid-song.
 - 54 tests pass.
+
+## 2026-11-09: the clock and output follow the timecode file
+
+Caiden suspected generated timecode was still showing and going out with an LTC file in place.
+Found and fixed:
+- **The clock never read the file.** It showed the sheet's start plus the playhead. It now shows
+  the LTC decoded from the loaded timecode track at the playing sample (`LTCTrack`), so a file
+  whose timecode differs from the sheet shows its own timecode, and silence shows dashes.
+- **A timecode file that failed to load fell back to generated timecode** (`try?` in the
+  loader). Now a song with a timecode file sends that file or nothing, with a red chip and the
+  reason. Master read failures are shown too, instead of silence without a word.
+- **Single-file drops chose the role by name.** Files are now told apart by listening for LTC
+  (first 20 s); the name only decides when nothing is heard. Same for folder drops and imports.
+- **A stale preload could re-cache old audio** after files changed. Loads now carry a
+  generation number and are discarded if files changed meanwhile.
+- Chips say where timecode comes from: "from file", "generated from the sheet", "no timecode
+  found in <file>", "can't be read". The timeline header shows the file's first timecode.
+- 58 tests pass, including a file whose LTC differs from the sheet and an unreadable file.

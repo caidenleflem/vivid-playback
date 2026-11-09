@@ -72,12 +72,13 @@ public enum FileMatcher {
         tokens(s).filter { !$0.allSatisfy(\.isNumber) && !roleWords.contains($0) }.joined()
     }
 
-    public static func match(rows: [SheetRow], files: [URL]) -> MatchResult {
+    /// `roles` overrides the name-based role for files whose content was checked.
+    public static func match(rows: [SheetRow], files: [URL], roles: [URL: AudioRole] = [:]) -> MatchResult {
         let audio = files.filter(isAudio)
         var claimed = Set<URL>()
         var matches: [Int: FileMatch] = [:]
         var ambiguities: [String] = []
-        let byRole = Dictionary(grouping: audio, by: { role(forFileName: $0.lastPathComponent) })
+        let byRole = Dictionary(grouping: audio, by: { roles[$0] ?? role(forFileName: $0.lastPathComponent) })
 
         func named(_ name: String) -> URL? {
             let wanted = name.lowercased()

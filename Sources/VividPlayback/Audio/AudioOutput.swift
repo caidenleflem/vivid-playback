@@ -153,22 +153,56 @@ enum SongLoader {
         return (0..<Int(buffer.format.channelCount)).map { Array(UnsafeBufferPointer(start: data[$0], count: n)) }
     }
 
-    /// The master and the timecode for `song`, ready to play. Missing files become silence
-    /// (master) or generated timecode, never an error, so the show can still run.
-    static func buffers(for song: Song, in show: Show, sampleRate: Double) -> PlaybackBuffers {
+    /// The master and the timecode for `song`, ready to play, plus anything that went wrong.
+    /// A song with a timecode file plays that file or no timecode at all: never generated
+    /// timecode in its place. A master that can't be read plays as silence, and says so.
+    static func buffers(for song: Song, in show: Show, sampleRate: Double) -> (PlaybackBuffers, masterProblem: String?) {
         var master: [[Float]] = []
-        if let url = show.url(forMediaPath: song.masterPath) { master = (try? read(url, sampleRate: sampleRate)) ?? [] }
+        var masterProblem: String?
+        if song.masterPath != nil {
+            if let url = show.url(forMediaPath: song.masterPath) {
+                do { master = try read(url, sampleRate: sampleRate) } catch { masterProblem = problem(url, error) }
+                if master.isEmpty && masterProblem == nil { masterProblem = "\(url.lastPathComponent) has no audio in it." }
+            } else {
+                masterProblem = "The master's location isn't known. Relink the media folder or choose the file again."
+            }
+        }
         var timecode: [Float]?
-        if let url = show.url(forMediaPath: song.timecodePath), let channels = try? read(url, sampleRate: sampleRate), !channels.isEmpty {
-            let index = song.timecodeFileChannel ?? (channels.count == 1 ? 0 :
-                LTCAnalyzer.analyze(channels: channels.map { Array($0.prefix(Int(sampleRate * 4))) }, sampleRate: sampleRate)?.channel ?? 0)
-            timecode = channels[min(index, channels.count - 1)]
+        var tcName: String?
+        var tcProblem: String?
+        if song.hasTimecode, song.timecodePath != nil {
+            if let url = show.url(forMediaPath: song.timecodePath) {
+                tcName = url.lastPathComponent
+                do {
+                    let channels = try read(url, sampleRate: sampleRate)
+                    if channels.isEmpty {
+                        tcProblem = "\(url.lastPathComponent) has no audio in it."
+                    } else {
+                        let index = song.timecodeFileChannel ?? (channels.count == 1 ? 0 :
+                            LTCAnalyzer.analyze(channels: channels.map { Array($0.prefix(Int(sampleRate * 20))) }, sampleRate: sampleRate)?.channel ?? 0)
+                        timecode = channels[min(index, channels.count - 1)]
+                    }
+                } catch {
+                    tcProblem = problem(url, error)
+                }
+            } else {
+                tcProblem = "The timecode file's location isn't known. Relink the media folder or choose the file again."
+            }
         }
         if master.isEmpty {
             let seconds = (song.length ?? 0) + song.fileOffset
             let frames = max(timecode?.count ?? 0, Int(seconds * sampleRate))
             master = [[Float](repeating: 0, count: frames)]
         }
-        return PlaybackBuffers.prepare(song: song, sampleRate: sampleRate, master: master, timecode: timecode)
+        let b = PlaybackBuffers.prepare(song: song, sampleRate: sampleRate, master: master, timecode: timecode,
+                                        timecodeFile: tcName, timecodeFileProblem: tcProblem)
+        return (b, masterProblem)
+    }
+
+    private static func problem(_ url: URL, _ error: Error) -> String {
+        if !FileManager.default.fileExists(atPath: url.path) {
+            return "\(url.lastPathComponent) isn't where the show expects it. Relink the media folder or choose the file again."
+        }
+        return "Couldn't read \(url.lastPathComponent): \(error.localizedDescription)"
     }
 }

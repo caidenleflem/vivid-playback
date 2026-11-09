@@ -223,7 +223,10 @@ public enum LTCAnalyzer {
     /// Reads the timecode in one channel. `expectedRate` breaks a tie only where the signal can't
     /// (for example a short file that never shows its highest frame number).
     public static func analyze(_ samples: [Float], sampleRate: Double, expectedRate: FrameRate? = nil) -> LTCAnalysis {
-        let frames = LTC.decode(samples, sampleRate: sampleRate)
+        analyze(frames: LTC.decode(samples, sampleRate: sampleRate), sampleRate: sampleRate, expectedRate: expectedRate)
+    }
+
+    static func analyze(frames: [LTCFrame], sampleRate: Double, expectedRate: FrameRate?) -> LTCAnalysis {
         var result = LTCAnalysis(sampleRate: sampleRate, decodedFrames: frames.count, rate: nil, first: nil, last: nil,
                                  firstSample: 0, lastSample: 0, jumps: [], dropouts: [])
         guard frames.count >= 2 else { return result }
@@ -281,5 +284,55 @@ public enum LTCAnalyzer {
             if a.decodedFrames > (best?.1.decodedFrames ?? 0) { best = (i, a) }
         }
         return best
+    }
+}
+
+
+/// The timecode actually recorded on a track, frame by frame, so the clock shows exactly what
+/// is going out (not what the sheet says should be there).
+public struct LTCTrack: Sendable {
+    public let rate: FrameRate
+    public let analysis: LTCAnalysis
+    let starts: [Int]
+    let codes: [Timecode]
+    let samplesPerFrame: Double
+
+    /// Nil when the track has no readable timecode.
+    public init?(samples: [Float], sampleRate: Double, expectedRate: FrameRate? = nil) {
+        let frames = LTC.decode(samples, sampleRate: sampleRate)
+        let analysis = LTCAnalyzer.analyze(frames: frames, sampleRate: sampleRate, expectedRate: expectedRate)
+        guard let rate = analysis.rate else { return nil }
+        var starts: [Int] = []
+        var codes: [Timecode] = []
+        for f in frames {
+            guard let tc = f.timecode(rate: rate) else { continue }
+            starts.append(f.startSample)
+            codes.append(tc)
+        }
+        guard !codes.isEmpty else { return nil }
+        self.rate = rate
+        self.analysis = analysis
+        self.starts = starts
+        self.codes = codes
+        self.samplesPerFrame = sampleRate / rate.framesPerSecond
+    }
+
+    public var first: Timecode? { codes.first }
+
+    /// The frame playing at `sample`, or nil where the track carries no timecode (silence before
+    /// it starts, a dropout, or after it ends).
+    public func timecode(atSample sample: Int) -> Timecode? {
+        // The last frame that starts at or before `sample` (allowing for edge detection lag).
+        let target = sample + Int(samplesPerFrame * 0.02)
+        var lo = 0, hi = starts.count - 1
+        guard hi >= 0, target >= starts[0] else { return nil }
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if starts[mid] <= target { lo = mid } else { hi = mid - 1 }
+        }
+        let into = Double(target - starts[lo])
+        if into < samplesPerFrame * 1.5 { return codes[lo] }
+        // The last frame of the file decodes one frame late at most; past that it's silence.
+        return nil
     }
 }

@@ -19,6 +19,11 @@ final class Transport: ObservableObject {
     @Published private(set) var status: OutputStatus = .clockOnly("Choose an audio output")
     @Published private(set) var isLoading = false
     @Published private(set) var timecodeGenerated = false
+    /// Where the current song's timecode comes from.
+    @Published private(set) var source: TimecodeSource = .none
+    /// The timecode file has readable LTC in it (only meaningful for `.file`).
+    @Published private(set) var trackFound = false
+    @Published private(set) var masterProblem: String?
     @Published private(set) var timecodeRouted = false
     /// Seconds from the song start; nil when not looping.
     @Published private(set) var loop: ClosedRange<Double>?
@@ -32,6 +37,8 @@ final class Transport: ObservableObject {
     private var anchorTime: CFTimeInterval = CACurrentMediaTime()
     private var timer: Timer?
     private var loadToken = UUID()
+    /// Bumped whenever files change, so a load that started before can't cache old audio.
+    private var generation = 0
     var onSongEnd: (() -> Void)?
 
     var length: Double { song?.length ?? buffers.map { $0.duration - (song?.fileOffset ?? 0) } ?? 0 }
@@ -120,6 +127,9 @@ final class Transport: ObservableObject {
             buffers = nil
             audio.state.buffers = nil
             timecodeGenerated = song.hasTimecode && song.timecodePath == nil
+            source = !song.hasTimecode ? .none : (song.timecodePath == nil ? .generated : .file((song.timecodePath! as NSString).lastPathComponent))
+            trackFound = false
+            masterProblem = nil
             locate(position)
             if play { self.play() }
             return
@@ -130,11 +140,13 @@ final class Transport: ObservableObject {
         }
         isLoading = true
         let rate = audio.sampleRate
+        let gen = generation
         Task {
-            let b = await Task.detached(priority: .userInitiated) { SongLoader.buffers(for: song, in: show, sampleRate: rate) }.value
+            let (b, masterProblem) = await Task.detached(priority: .userInitiated) { SongLoader.buffers(for: song, in: show, sampleRate: rate) }.value
             guard self.loadToken == token else { return }
             self.isLoading = false
-            self.cache[song.id] = b
+            if self.generation == gen { self.cache[song.id] = b }
+            self.masterProblem = masterProblem
             self.install(b, at: position, play: play)
         }
     }
@@ -145,6 +157,8 @@ final class Transport: ObservableObject {
         audio.state.buffers = b
         buffers = b
         timecodeGenerated = b.timecodeGenerated
+        source = b.source
+        trackFound = b.ltc != nil
         locate(position)
         if play { self.play() }
         // Let the audio thread finish any block that still uses the old song before it's freed.
@@ -155,16 +169,42 @@ final class Transport: ObservableObject {
     func preload(_ song: Song?, in show: Show) {
         guard let song, audio.isRunning, cache[song.id] == nil else { return }
         let rate = audio.sampleRate
+        let gen = generation
         Task {
-            let b = await Task.detached(priority: .utility) { SongLoader.buffers(for: song, in: show, sampleRate: rate) }.value
-            if self.audio.sampleRate == rate { self.cache[song.id] = b }
+            let (b, _) = await Task.detached(priority: .utility) { SongLoader.buffers(for: song, in: show, sampleRate: rate) }.value
+            if self.audio.sampleRate == rate && self.generation == gen { self.cache[song.id] = b }
             // Keep memory in check: the current song, the next one, and nothing else.
             let keep: Set<UUID> = [self.song?.id, song.id].compactMap { $0 }.reduce(into: []) { $0.insert($1) }
             self.cache = self.cache.filter { keep.contains($0.key) }
         }
     }
 
-    func invalidateCache() { cache = [:] }
+    /// The first timecode in the current song's timecode file.
+    var firstFileTimecode: Timecode? { buffers?.ltc?.first }
+
+    func invalidateCache() {
+        cache = [:]
+        generation += 1
+    }
+
+    /// The timecode going out right now: read from the song's timecode file when it has one,
+    /// so the clock shows exactly what the console receives. Nil where nothing is sent.
+    func outputTimecode(for song: Song, at time: CFTimeInterval = CACurrentMediaTime()) -> Timecode? {
+        guard song.hasTimecode else { return nil }
+        if usesAudio, let b = buffers, self.song?.id == song.id {
+            switch b.source {
+            case .file:
+                guard let track = b.ltc else { return nil }
+                let frame = Int(((position(at: time) + song.fileOffset) * audio.sampleRate).rounded())
+                return track.timecode(atSample: frame)
+            case .unreadable, .none:
+                return nil
+            case .generated:
+                break
+            }
+        }
+        return song.start.adding(frames: Int((position(at: time) * song.rate.framesPerSecond + 1e-6).rounded(.down)))
+    }
 
     // MARK: Playhead
 

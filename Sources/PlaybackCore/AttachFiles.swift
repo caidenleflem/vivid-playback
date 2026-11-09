@@ -28,15 +28,36 @@ public enum AttachError: Error, CustomStringConvertible, Equatable {
 }
 
 extension ShowImporter {
+    /// Is this a timecode file? Listens for LTC in its first 20 seconds; the name decides only
+    /// when the file can't be read. LTC in a file named like a master still makes it timecode.
+    public static func detectRole(_ url: URL, reader: AudioFileReading) -> AudioRole {
+        let byName = FileMatcher.role(forFileName: url.lastPathComponent)
+        guard let audio = try? reader.readChannels(of: url, seconds: 20) else { return byName }
+        for ch in audio.channels.prefix(8) where LTC.decode(ch, sampleRate: audio.sampleRate).count >= 20 {
+            return .timecode
+        }
+        // No LTC heard: the name decides (a timecode file whose LTC starts late stays timecode,
+        // and the checks will say if it never has any).
+        return byName
+    }
+
+    public static func detectRoles(_ files: [URL], reader: AudioFileReading) -> [URL: AudioRole] {
+        var roles: [URL: AudioRole] = [:]
+        for url in files where FileMatcher.isAudio(url) { roles[url] = detectRole(url, reader: reader) }
+        return roles
+    }
+
     /// Matches audio files to songs in an imported show, the same way an import does, and fills
-    /// in only what's missing: a file never replaces one a song already has.
-    public static func attach(_ files: [URL], to show: inout Show) -> AttachResult {
+    /// in only what's missing: a file never replaces one a song already has. With a reader,
+    /// files are told apart by listening for LTC, not only by name.
+    public static func attach(_ files: [URL], to show: inout Show, reader: AudioFileReading? = nil) -> AttachResult {
         let audio = files.filter(FileMatcher.isAudio)
+        let roles = reader.map { detectRoles(audio, reader: $0) } ?? [:]
         let rows = show.songs.enumerated().map { i, s in
             SheetRow(rowIndex: i, number: s.number, title: s.title, start: s.start, end: nil, length: s.length, rate: s.rate,
                      fileOffset: s.fileOffset, masterFile: nil, timecodeFile: nil, notes: nil)
         }
-        let match = FileMatcher.match(rows: rows, files: audio)
+        let match = FileMatcher.match(rows: rows, files: audio, roles: roles)
         let base = show.mediaFolder.map { URL(fileURLWithPath: $0) }
         func path(_ url: URL) -> String { base.map { ShowStore.relativePath(of: url, in: $0) } ?? url.standardizedFileURL.path }
         var result = AttachResult(ambiguities: match.ambiguities)

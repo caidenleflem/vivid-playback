@@ -409,7 +409,7 @@ struct SongList: View {
         .dropDestination(for: URL.self) { urls, _ in
             // A file dropped on a song: LTC/TC/timecode in the name makes it the timecode file.
             guard !model.locked, let url = urls.first, FileMatcher.isAudio(url) else { return false }
-            model.assign(url, role: FileMatcher.role(forFileName: url.lastPathComponent) == .timecode ? .timecode : .master, to: song)
+            model.dropFile(url, on: song)
             return true
         } isTargeted: { on in dropTarget = on ? song.id : (dropTarget == song.id ? nil : dropTarget) }
         .contentShape(Rectangle())
