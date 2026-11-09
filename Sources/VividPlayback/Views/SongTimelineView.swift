@@ -33,11 +33,22 @@ struct SongTimelineView: View {
             LiveClock(size: 30, weight: .light)
                 .matchedGeometryEffect(id: "clock", in: morph)
             if let song = model.currentSong { Chip(song.rate.displayName) }
+            if transport.isLoading { ProgressView().controlSize(.small) }
             Spacer()
+            Button { model.toggleLoop() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "repeat").foregroundStyle(transport.loop != nil ? Brand.gold : Brand.ink)
+                    Text(transport.loop != nil ? "Looping" : "Loop")
+                    KeyCap(key: "L")
+                }
+            }
+            .buttonStyle(QuietButtonStyle())
+            .help("Loop between the markers either side of the playhead, or the whole song")
             Button { model.addMarker() } label: {
                 HStack(spacing: 8) { Image(systemName: "plus"); Text("Add marker"); KeyCap(key: "M") }
             }
             .buttonStyle(QuietButtonStyle())
+            .disabled(model.locked)
             Button("Done") { model.go(.library) }
                 .buttonStyle(QuietButtonStyle())
         }
@@ -65,10 +76,13 @@ struct SongTimelineView: View {
                     Chip(song.end.map { "\(song.start) → \($0)" } ?? song.start.description).monospacedDigit()
                     Chip(song.rate.displayName)
                     if song.fileOffset != 0 { Chip(String(format: "Offset %+.3f s", song.fileOffset)) }
-                    let issues = model.issues(for: song)
-                    if issues.isEmpty {
+                    let issues = model.issues(for: song).filter { $0.kind != .missingTimecode }
+                    if transport.timecodeGenerated {
+                        Chip("Timecode generated from the sheet") { StatusDot(color: Brand.gold) }
+                    }
+                    if issues.isEmpty && !transport.timecodeGenerated {
                         Chip("Timecode verified") { StatusDot(color: Brand.ok) }
-                    } else {
+                    } else if !issues.isEmpty {
                         Button { model.issuesShown = true } label: {
                             Chip(issues.count == 1 ? issues[0].title : "\(issues.count) things to check") { StatusDot(color: Brand.warn) }
                         }
@@ -134,15 +148,25 @@ struct TimelinePanel: View {
                         }
                     }
                     .overlay(alignment: .topLeading) {
+                        if let loop = transport.loop {
+                            let x0 = trackWidth * CGFloat(max(0, loop.lowerBound) / length)
+                            let x1 = trackWidth * CGFloat(min(length, loop.upperBound) / length)
+                            Rectangle().fill(Brand.gold.opacity(0.08))
+                                .overlay(alignment: .top) { Rectangle().fill(Brand.gold.opacity(0.6)).frame(height: 2) }
+                                .frame(width: max(2, x1 - x0), height: song.markers.isEmpty ? 330 : 384)
+                                .offset(x: labelWidth + 12 + x0, y: 24)
+                                .allowsHitTesting(false)
+                        }
                         markerLines(width: trackWidth, length: length)
                             .offset(x: labelWidth + 12)
                         playhead(position: position)
                             .offset(x: labelWidth + 12 + playheadX - 1)
                     }
                     .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { value in
+                        // Scrub on the waveform and timecode lanes; the marker lane keeps its clicks.
                         let x = value.location.x - labelWidth - 12
-                        guard x >= 0, trackWidth > 0 else { return }
+                        guard x >= 0, trackWidth > 0, value.startLocation.y < 330 else { return }
                         transport.locate(Double(x / trackWidth) * length)
                     })
                 }
@@ -228,9 +252,9 @@ struct TimelinePanel: View {
                 let x = width * CGFloat(Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond / length)
                 let flip = x > width * 0.85
                 HStack(spacing: 7) {
-                    if flip { markerLabel(marker.label) }
+                    if flip { markerChip(marker) }
                     Capsule().fill(Brand.gold).frame(width: 2, height: 36)
-                    if !flip { markerLabel(marker.label) }
+                    if !flip { markerChip(marker) }
                 }
                 .fixedSize()
                 .alignmentGuide(.leading) { d in flip ? d.width : 0 }
@@ -245,6 +269,18 @@ struct TimelinePanel: View {
         Text(text).font(.manrope(11.5, .semibold)).foregroundStyle(Brand.ink)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 6).fill(Brand.phantom))
+    }
+
+    private func markerChip(_ marker: Marker) -> some View {
+        markerLabel(marker.label)
+            .contentShape(Rectangle())
+            .onTapGesture { transport.locate(model.seconds(of: marker, in: song)) }
+            .contextMenu {
+                Button("Go to Marker") { transport.locate(model.seconds(of: marker, in: song)) }
+                Button("Rename…") { model.markerEdit = MarkerEdit(marker: marker, song: song) }.disabled(model.locked)
+                Button("Delete") { model.deleteMarker(marker, in: song) }.disabled(model.locked)
+            }
+            .help("Click to go here. Right-click to rename or delete.")
     }
 
     private func markerLines(width: CGFloat, length: Double) -> some View {

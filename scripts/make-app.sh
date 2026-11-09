@@ -23,7 +23,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/VividPlayback" "$APP/Contents/MacOS/Vivid Playback"
 cp -R Sources/VividPlayback/Resources/Fonts "$APP/Contents/Resources/Fonts"
 cp -R Sources/VividPlayback/Resources/Images "$APP/Contents/Resources/Images"
-[ -f Packaging/AppIcon.icns ] && cp Packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# App icon: every size macOS asks for, from the 1024 px master.
+ICONSET="build/AppIcon.iconset"
+rm -rf "$ICONSET" && mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+  sips -z $size $size Packaging/AppIcon.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z $((size * 2)) $((size * 2)) Packaging/AppIcon.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$ICONSET"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" Packaging/Info.plist > "$APP/Contents/Info.plist"
 
 # Ad-hoc signature so macOS will run it. A Developer ID signature (and notarization) is only

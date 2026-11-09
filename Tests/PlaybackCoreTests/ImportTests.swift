@@ -88,7 +88,8 @@ final class ImportTests: XCTestCase {
         let song = Song(title: "Encore", start: Timecode("12:00:00:00", rate: .fps30)!)
         let issues = ShowValidator.validate(song: song, files: SongFileReport())
         XCTAssertEqual(Set(issues.map(\.kind)), [.missingMaster, .missingTimecode])
-        XCTAssertTrue(issues.allSatisfy { $0.severity == .error })
+        XCTAssertEqual(issues.first { $0.kind == .missingMaster }?.severity, .error)
+        XCTAssertEqual(issues.first { $0.kind == .missingTimecode }?.severity, .warning, "timecode can be generated")
     }
 }
 

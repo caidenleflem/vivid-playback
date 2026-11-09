@@ -111,6 +111,9 @@ public enum Mixer {
         let right = map.masterRight.flatMap { $0 < outputs.count ? outputs[$0] : nil }
         let tc = map.timecode.flatMap { $0 < outputs.count ? outputs[$0] : nil }
         let rightSource = b.masterChannels > 1 ? b.frameCount : 0
+        // The master on a single output (a two-output laptop: music left, timecode right) is
+        // summed to mono so nothing is lost.
+        let monoSum = right == nil && b.masterChannels > 1
         var pos = position
         var i = 0
         while i < frames {
@@ -118,7 +121,7 @@ public enum Mixer {
             if pos >= 0 && pos < b.frameCount {
                 let l = b.master[pos]
                 let r = b.master[rightSource + pos]
-                if let left { left[i] = l * masterGain }
+                if let left { left[i] = (monoSum ? (l + r) * 0.5 : l) * masterGain }
                 if let right { right[i] = r * masterGain }
                 if let tc, let t = b.timecode { tc[i] = t[pos] * timecodeGain }
             }

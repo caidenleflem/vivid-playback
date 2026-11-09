@@ -31,9 +31,14 @@ folder: `./scripts/make-dmg.sh`. The installer lands in `build/`.
   file, and tells you about anything that doesn't line up. It never fixes anything silently.
 - **Try the example show** to see it work before you have files to hand.
 
-Keys: **Space** play or pause · **← →** previous and next song · **Return** or **⌘T** opens the
-song timeline · **M** adds a marker · **⇧⌘F** full-screen clock · **Esc** back to the library ·
-**⇧⌘I** things to check.
+Keys: **Space** play or pause · **← →** previous and next song · **⌘←** top of the song ·
+**Return** or **⌘T** song timeline · **M** add a marker · **L** loop between markers ·
+**⌘G** go to timecode · **⇧⌘F** full-screen clock · **Esc** back to the library ·
+**⌥⌘O** audio output · **⇧⌘E** edit setlist · **⇧⌘L** show mode · **⇧⌘I** things to check.
+
+**Audio output:** pick the interface, the master outputs (a stereo pair, or one output in mono)
+and the timecode output. On a two-output Mac, put the master on Output 1 (mono) and timecode on
+Output 2. The timecode level is set on its own and never follows the master level.
 
 Shows are saved in `~/Documents/Vivid Playback` as `.vividshow` packages and reopen on launch.
 
@@ -45,9 +50,14 @@ Shows are saved in `~/Documents/Vivid Playback` as `.vividshow` packages and reo
 | Offset sheet import with column auto-detection | Done, tested (CSV and tab-separated) |
 | Matching masters and timecode files to songs | Done, tested |
 | LTC decoding and checking (start, rate, jumps, dropouts, lengths, sample rates) | Done, tested |
-| Library, big clock, glass player bar, song timeline with the morph, markers, full-screen clock, first run | Built, first run on the Mac pending |
-| **Audio:** master and LTC out, sample-locked, with channel routing | **Next.** This build runs the clock and the setlist without sound. |
-| Excel (.xlsx) import | Later. Export the sheet as CSV for now. |
+| Library, big clock, glass player bar, song timeline with the morph, markers, full-screen clock, first run | Done |
+| Audio: master and LTC out of your interface, sample-locked, any output channels, fixed LTC level | Done (the lock is tested in the core; needs a check on your interface) |
+| Timecode generated from the sheet when a song has no timecode file | Done, tested |
+| Setlists: reorder, skip tonight, duplicate; stop after each song; show mode lock | Done |
+| Loop between markers, go to timecode, rename and delete markers | Done |
+| Excel (.xlsx) sheets | Done, tested. Numbers files: export as .xlsx or CSV. |
+| Interface unplugged mid-show: playback stops with a clear banner | Done |
+| MIDI timecode, Art-Net timecode, chase, grandMA3 export | Later (see docs/IDEAS-CUEPOINTS.md) |
 
 ## Layout
 

@@ -63,3 +63,32 @@
 - A real offset sheet and one song's files, to test against.
 - The interface and the channel the timecode goes out on.
 - Console (grandMA3?) for later export and OSC work.
+
+## 2026-11-09: audio and the rest of v1
+
+**Done**
+- Audio: one AVAudioEngine source node renders every output channel through the core
+  `Mixer` from a single frame counter, so master and LTC can't drift. Interface picked by
+  Core Audio UID, any output channels, master as a stereo pair or one output (summed to mono),
+  timecode level fixed and separate from the master level. Files are converted to the
+  interface's sample rate on load; the next song is preloaded so auto-advance is instant.
+- Timecode generated from the sheet when a song has no timecode file, aligned to the sample
+  (tested), and shown as "Timecode out · generated". Missing timecode is now a warning.
+- The playhead follows the audio clock, allowing for output latency; the plain clock is only
+  used with no audio output.
+- Interface unplugged: playback stops and a solid banner says so. If the show's interface is
+  missing at open, it plays on the default output and says so.
+- Setlists (reorder, skip tonight, duplicate, new, delete), stop after each song, show mode
+  lock, loop between markers, go to timecode, marker rename/delete/click-to-locate, relink
+  media folder, check files again.
+- Excel (.xlsx) offset sheets, with a dependency-free zip/deflate reader (tested).
+- App icon.
+- 46 tests pass.
+
+**Assumptions**
+- Single-key shortcuts are off while a sheet is open, so typing never moves the playhead.
+- In show mode, playback controls still work; editing, importing and opening are off.
+
+**Needs Caiden**
+- A run on the real interface: confirm the console reads timecode and that it lines up.
+- A real offset sheet, to tune the column detection.

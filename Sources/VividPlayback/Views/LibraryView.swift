@@ -67,8 +67,22 @@ struct Sidebar: View {
             section("Setlists") {
                 ForEach(model.show?.setlists ?? []) { list in
                     navRow(list.name, selected: model.setlist?.id == list.id) {
-                        model.selectedSetlistID = list.id
+                        model.select(setlist: list)
                     }
+                    .contextMenu {
+                        Button("Edit Setlist…") { model.select(setlist: list); model.setlistEditorShown = true }
+                        Button("Duplicate") { model.duplicateSetlist(list) }
+                        Button("Delete") { model.deleteSetlist(list) }.disabled((model.show?.setlists.count ?? 0) < 2)
+                    }
+                    .disabled(model.locked && model.transport.isPlaying)
+                }
+                if !model.locked {
+                    Button { model.setlistEditorShown = true } label: {
+                        Label("Edit setlist", systemImage: "list.bullet").font(.manrope(12.5, .medium)).foregroundStyle(Brand.space)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 4)
                 }
             }
 
@@ -80,29 +94,22 @@ struct Sidebar: View {
 
             Spacer()
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) { StatusDot(color: Brand.graphite); Text("Master · Out \(channels(model.show?.routing.masterChannels ?? [1, 2]))") }
+            if model.locked {
                 HStack(spacing: 8) {
-                    StatusDot(color: Brand.graphite)
-                    Text(model.show?.routing.timecodeChannel.map { "Timecode · Out \($0)" } ?? "Timecode · output not set")
+                    Image(systemName: "lock.fill").foregroundStyle(Brand.gold)
+                    Text("Show mode").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.ink)
+                    Spacer()
+                    Button("Unlock") { model.locked = false }.buttonStyle(.plain).font(.manrope(12)).foregroundStyle(Brand.space)
                 }
+                .padding(.horizontal, 10)
             }
-            .font(.manrope(12))
-            .foregroundStyle(Brand.steel)
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.black.opacity(0.25)))
-            .help("Audio output arrives in the next build.")
+            OutputsBox()
         }
         .padding(.top, 52)
         .padding(.horizontal, 12)
         .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .top)
         .glass(cornerRadius: 18, alpha: 0.64)
-    }
-
-    private func channels(_ c: [Int]) -> String {
-        c.count == 2 ? "\(c[0])–\(c[1])" : c.map(String.init).joined(separator: ", ")
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
@@ -131,6 +138,43 @@ struct Sidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct OutputsBox: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var transport: Transport
+
+    var body: some View {
+        let routing = model.show?.routing ?? OutputRouting()
+        let live = transport.audio.isRunning
+        Button { model.outputShown = true } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(live ? (transport.deviceName ?? "Audio output") : "No audio output")
+                    .font(.manrope(12, .semibold)).foregroundStyle(Brand.ink).lineLimit(1)
+                HStack(spacing: 8) {
+                    StatusDot(color: live ? Brand.ok : Brand.graphite)
+                    Text("Master · \(channels(routing.masterChannels))")
+                }
+                HStack(spacing: 8) {
+                    StatusDot(color: live && transport.timecodeRouted ? (transport.isPlaying ? Brand.ok : Brand.gold) : Brand.warn,
+                              pulsing: live && transport.timecodeRouted && transport.isPlaying)
+                    Text(routing.timecodeChannel.map { "Timecode · Out \($0)" } ?? "Timecode · not set")
+                }
+            }
+            .font(.manrope(12))
+            .foregroundStyle(Brand.steel)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12).fill(.black.opacity(0.25)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Audio output (⌥⌘O)")
+    }
+
+    private func channels(_ c: [Int]) -> String {
+        c.count == 2 ? "Out \(c[0])–\(c[1])" : c.first.map { "Out \($0) (mono)" } ?? "not set"
     }
 }
 
@@ -297,7 +341,7 @@ struct SongList: View {
             Divider().overlay(.white.opacity(0.06))
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, song in
+                    ForEach(Array(model.setlistSongs.enumerated()), id: \.element.id) { index, song in
                         songRow(song, index: index + 1)
                         Divider().overlay(.white.opacity(0.04))
                     }
@@ -314,6 +358,7 @@ struct SongList: View {
     private func songRow(_ song: Song, index: Int) -> some View {
         let isCurrent = model.currentSong?.id == song.id
         let issues = model.issues(for: song)
+        let skipped = model.isSkipped(song)
         return row {
             Group {
                 if isCurrent {
@@ -343,24 +388,28 @@ struct SongList: View {
             Text(song.length.map(TimeFormat.clock) ?? "—").frame(width: 84, alignment: .leading)
             Text(song.rate.shortName).frame(width: 80, alignment: .leading)
             HStack(spacing: 8) {
-                StatusDot(color: statusColor(issues))
-                Text(statusText(issues)).lineLimit(1)
+                StatusDot(color: skipped ? Brand.graphite : statusColor(issues))
+                Text(skipped ? "Skipped tonight" : statusText(issues)).lineLimit(1)
             }
             .frame(width: 180, alignment: .leading)
         }
+        .opacity(skipped ? 0.45 : 1)
         .font(.manrope(13).monospacedDigit())
         .foregroundStyle(Brand.steel)
         .frame(height: 52)
         .background(isCurrent ? Brand.gold.opacity(0.09) : (selected == song.id ? Color.white.opacity(0.04) : .clear))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
+            guard !skipped else { return }
             if !isCurrent { model.cue(song) }
             model.go(.timeline)
         }
         .onTapGesture { selected = song.id }
         .contextMenu {
-            Button("Cue This Song") { model.cue(song) }
-            Button("Open Timeline") { model.cue(song); model.go(.timeline) }
+            Button("Cue This Song") { model.cue(song) }.disabled(skipped)
+            Button("Open Timeline") { model.cue(song); model.go(.timeline) }.disabled(skipped)
+            Divider()
+            Button(skipped ? "Play Tonight" : "Skip Tonight") { model.toggleSkip(song) }.disabled(model.locked)
         }
     }
 
@@ -378,7 +427,7 @@ struct SongList: View {
         guard let first = issues.max(by: { $0.severity < $1.severity }) else { return "Ready" }
         switch first.kind {
         case .missingMaster: return "No master"
-        case .missingTimecode: return "No timecode file"
+        case .missingTimecode: return "Generated timecode"
         case .unreadableFile: return "Can't read a file"
         case .noTimecodeFound: return "No timecode found"
         case .startMismatch: return "Check timecode"

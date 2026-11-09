@@ -82,8 +82,33 @@ struct StateChips: View {
                 StatusDot(color: transport.isPlaying ? Brand.gold : Brand.graphite, pulsing: transport.isPlaying)
             }
             if let song = model.currentSong { Chip(song.rate.displayName) }
-            Chip("Preview · no audio yet") { StatusDot(color: Brand.graphite) }
-                .help("This build runs the clock and the setlist. Master and timecode output come in the next build.")
+            outputChip
+            if transport.loop != nil { Chip("Looping") { Image(systemName: "repeat").font(.system(size: 10, weight: .bold)).foregroundStyle(Brand.gold) } }
+            if model.locked { Chip("Show mode") { Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(Brand.gold) } }
+        }
+    }
+
+    @ViewBuilder private var outputChip: some View {
+        switch transport.status {
+        case .playing, .lost:
+            if !transport.audio.isRunning {
+                Chip("No audio output") { StatusDot(color: Color(hex: 0xE5675A)) }
+            } else if transport.timecodeRouted {
+                Chip(transport.timecodeGenerated ? "Timecode out · generated" : "Timecode out") {
+                    StatusDot(color: transport.isPlaying ? Brand.ok : Brand.graphite, pulsing: transport.isPlaying)
+                }
+                .help(transport.timecodeGenerated ? "This song has no timecode file, so timecode is generated from the sheet." : "Timecode is going out on its own output.")
+            } else {
+                Button { model.outputShown = true } label: {
+                    Chip("Choose a timecode output") { StatusDot(color: Brand.warn) }
+                }
+                .buttonStyle(.plain)
+            }
+        case .clockOnly(let why):
+            Button { model.outputShown = true } label: {
+                Chip("Clock only · \(why)") { StatusDot(color: Brand.graphite) }
+            }
+            .buttonStyle(.plain)
         }
     }
 }

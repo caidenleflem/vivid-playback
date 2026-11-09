@@ -51,7 +51,10 @@ public enum ShowValidator {
 
         for e in files.readErrors { add(.error, .unreadableFile, "\(name) has a file that can't be read", e) }
         if song.masterPath == nil { add(.error, .missingMaster, "\(name) has no master", "No master file is matched to \(name) yet.") }
-        if song.timecodePath == nil { add(.error, .missingTimecode, "\(name) has no timecode", "No timecode file is matched to \(name) yet.") }
+        if song.timecodePath == nil {
+            add(.warning, .missingTimecode, "\(name) uses generated timecode",
+                "No timecode file is matched to \(name), so timecode is generated from the sheet, starting at \(song.start). Add a timecode file if the console expects a specific one.")
+        }
 
         if let a = files.analysis, let tcInfo = files.timecode {
             if !a.hasTimecode {

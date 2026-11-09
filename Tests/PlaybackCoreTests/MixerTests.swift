@@ -52,6 +52,15 @@ final class MixerTests: XCTestCase {
         XCTAssertEqual(out[1][5], 0.3)
     }
 
+    func testMasterOnOneOutputIsSummedToMono() {
+        let b = PlaybackBuffers(sampleRate: 48_000, master: [[Float](repeating: 0.4, count: 10), [Float](repeating: 0.2, count: 10)],
+                                timecode: [Float](repeating: 0.5, count: 10))
+        let map = OutputMap(routing: OutputRouting(masterChannels: [1], timecodeChannel: 2), channelCount: 2)
+        let out = run(b, map: map, frames: 5)
+        XCTAssertEqual(out[0][0], 0.3, accuracy: 1e-6)
+        XCTAssertEqual(out[1][0], 0.5)
+    }
+
     func testLoopJumpsBack() {
         let ramp = (0..<1000).map { Float($0) }
         let b = PlaybackBuffers(sampleRate: 48_000, master: [ramp, ramp], timecode: nil)

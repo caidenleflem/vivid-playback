@@ -57,58 +57,6 @@ enum Waveform {
     }
 }
 
-/// The playhead. For now it's a clock: it runs the timecode display, the progress and the
-/// setlist, without sound. The audio engine (master and LTC out, sample-locked) replaces the
-/// clock source in the next build; everything that reads `position(at:)` stays the same.
-@MainActor
-final class Transport: ObservableObject {
-    @Published private(set) var isPlaying = false
-    /// Seconds from the song's start timecode when the clock was last anchored.
-    @Published private(set) var anchorPosition: Double = 0
-    private var anchorTime: CFTimeInterval = CACurrentMediaTime()
-    private var timer: Timer?
-    var length: Double = 0
-    var onSongEnd: (() -> Void)?
-
-    func position(at time: CFTimeInterval = CACurrentMediaTime()) -> Double {
-        isPlaying ? anchorPosition + (time - anchorTime) : anchorPosition
-    }
-
-    func play() {
-        guard !isPlaying else { return }
-        anchorTime = CACurrentMediaTime()
-        isPlaying = true
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkEnd() }
-        }
-    }
-
-    func pause() {
-        guard isPlaying else { return }
-        anchorPosition = position()
-        isPlaying = false
-        timer?.invalidate()
-        timer = nil
-    }
-
-    func toggle() { isPlaying ? pause() : play() }
-
-    func locate(_ seconds: Double) {
-        anchorPosition = max(0, min(seconds, length))
-        anchorTime = CACurrentMediaTime()
-    }
-
-    func load(length: Double) {
-        self.length = length
-        locate(0)
-    }
-
-    private func checkEnd() {
-        if isPlaying && length > 0 && position() >= length { onSongEnd?() }
-    }
-}
-
 enum ImportState {
     case idle
     case running(ImportStep)
@@ -118,6 +66,12 @@ enum ImportState {
 
 enum Screen: Equatable {
     case firstRun, library, timeline, clock
+}
+
+struct MarkerEdit: Identifiable {
+    let marker: Marker
+    let song: Song
+    var id: UUID { marker.id }
 }
 
 @MainActor
@@ -131,13 +85,31 @@ final class AppModel: ObservableObject {
     @Published var importState: ImportState = .idle
     @Published var waveforms: [UUID: [Float]] = [:]
     @Published var issuesShown = false
+    @Published var outputShown = false
+    @Published var setlistEditorShown = false
+    @Published var goToShown = false
+    @Published var markerEdit: MarkerEdit?
     @Published var selectedSetlistID: UUID?
+    /// Show mode: playback only, nothing can be edited.
+    @Published var locked = false
+    @Published var stopAfterEach = UserDefaults.standard.bool(forKey: "stopAfterEach") {
+        didSet { UserDefaults.standard.set(stopAfterEach, forKey: "stopAfterEach") }
+    }
+    @Published var devices: [AudioDevice] = []
 
     let transport = Transport()
     private let reader = AVAudioFileReader()
 
     init() {
         transport.onSongEnd = { [weak self] in self?.advanceAfterSongEnd() }
+        refreshDevices()
+        AudioDevices.observeChanges { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshDevices()
+                self.transport.devicesChanged(routing: self.show?.routing ?? OutputRouting())
+            }
+        }
         // `--demo library|timeline|clock` opens the example show on that screen, rolling.
         // Used by the build to screenshot each screen.
         let args = ProcessInfo.processInfo.arguments
@@ -148,35 +120,19 @@ final class AppModel: ObservableObject {
         reopenLastShow()
     }
 
-    private func runDemo(_ name: String) {
-        let target: Screen
-        switch name {
-        case "library": target = .library
-        case "timeline": target = .timeline
-        case "clock": target = .clock
-        default: return
-        }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
-        let reader = self.reader
-        Task {
-            guard let report = try? await Task.detached(operation: { () -> ImportReport in
-                try ExampleShow.write(to: folder)
-                return try ShowImporter(reader: reader).importFolder(folder, name: "Example Tour 2027")
-            }).value else { return }
-            load(report.show, package: folder.appendingPathComponent("Example.vividshow"), issues: report.issues)
-            if let third = queue.dropFirst(2).first ?? queue.first { cue(third) }
-            transport.locate(9.4)
-            if target == .timeline, var show = self.show, let song = currentSong,
-               let index = show.songs.firstIndex(where: { $0.id == song.id }) {
-                show.songs[index].markers = [(0.4, "Hit 1"), (5, "Verse 1"), (11, "Chorus · big look"), (17, "Bridge · blackout")].map {
-                    Marker(time: song.start.adding(frames: Int($0.0 * song.rate.framesPerSecond)), label: $0.1)
-                }
-                self.show = show
-            }
-            screen = target
-            transport.play()
-        }
+    func refreshDevices() { devices = AudioDevices.all() }
+
+    /// While a sheet is open, single-key shortcuts (Space, M, L, arrows) stay out of the way of typing.
+    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil }
+
+    /// Every song in the setlist, in order, including the ones skipped tonight.
+    var setlistSongs: [Song] {
+        guard let show else { return [] }
+        guard let setlist else { return show.songs }
+        return setlist.songIDs.compactMap(show.song(id:))
     }
+
+    func isSkipped(_ song: Song) -> Bool { setlist?.skipped.contains(song.id) ?? false }
 
     // MARK: Songs
 
@@ -205,33 +161,31 @@ final class AppModel: ObservableObject {
 
     func issues(for song: Song) -> [ShowIssue] { issues.filter { $0.songID == song.id } }
 
-    func cue(_ song: Song) {
+    func cue(_ song: Song, play: Bool? = nil) {
+        guard let show else { return }
         currentSongID = song.id
-        transport.load(length: song.length ?? 0)
+        transport.load(song, in: show, play: play)
+        transport.preload(nextSong, in: show)
         loadWaveform(for: song)
     }
 
     func next() {
-        let q = queue
-        guard let cur = currentSong, let i = q.firstIndex(where: { $0.id == cur.id }), i + 1 < q.count else { return }
-        cue(q[i + 1])
+        guard let n = nextSong else { return }
+        cue(n)
     }
 
     func previous() {
         let q = queue
         guard let cur = currentSong, let i = q.firstIndex(where: { $0.id == cur.id }) else { return }
         // Like a music player: back to the top first, then the song before.
-        if transport.position() > 3 || i == 0 { transport.locate(0) } else { cue(q[i - 1]) }
+        if transport.position() > 3 || i == 0 { transport.locate(transport.lowerBound) } else { cue(q[i - 1]) }
     }
 
     private func advanceAfterSongEnd() {
-        if nextSong != nil {
-            let wasPlaying = transport.isPlaying
-            next()
-            if wasPlaying { transport.play() }
+        if let n = nextSong {
+            cue(n, play: !stopAfterEach)
         } else {
             transport.pause()
-            transport.locate(transport.length)
         }
     }
 
@@ -251,23 +205,145 @@ final class AppModel: ObservableObject {
     func toggleTimeline() { go(screen == .timeline ? .library : .timeline) }
     func toggleClock() { go(screen == .clock ? .library : .clock) }
 
-    // MARK: Markers
+    // MARK: Editing (blocked in show mode)
+
+    private func edit(_ change: (inout Show) -> Void) {
+        guard !locked, var show else { return }
+        change(&show)
+        self.show = show
+        if let song = currentSong { transport.update(song, in: show) }
+        save()
+    }
 
     func addMarker() {
-        guard screen == .timeline, var show, let song = currentSong, let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+        guard screen == .timeline, let song = currentSong else { return }
         let tc = timecode(for: song, at: transport.position())
-        let n = show.songs[i].markers.count + 1
         withAnimation(.vivid(0.45)) {
-            show.songs[i].markers.append(Marker(time: tc, label: "Marker \(n)"))
-            show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
-            self.show = show
+            edit { show in
+                guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+                show.songs[i].markers.append(Marker(time: tc, label: "Marker \(show.songs[i].markers.count + 1)"))
+                show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
+            }
         }
+    }
+
+    func renameMarker(_ marker: Marker, in song: Song, to label: String) {
+        let text = label.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        edit { show in
+            guard let s = show.songs.firstIndex(where: { $0.id == song.id }),
+                  let m = show.songs[s].markers.firstIndex(where: { $0.id == marker.id }) else { return }
+            show.songs[s].markers[m].label = text
+        }
+    }
+
+    func deleteMarker(_ marker: Marker, in song: Song) {
+        withAnimation(.vivid(0.4)) {
+            edit { show in
+                guard let s = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+                show.songs[s].markers.removeAll { $0.id == marker.id }
+            }
+        }
+    }
+
+    func seconds(of marker: Marker, in song: Song) -> Double {
+        Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond
+    }
+
+    /// Loops the stretch between the markers either side of the playhead (the whole song if
+    /// there are none). Calling it again stops looping.
+    func toggleLoop() {
+        guard let song = currentSong else { return }
+        if transport.loop != nil { transport.setLoop(nil); return }
+        let p = transport.position()
+        let points = song.markers.map { seconds(of: $0, in: song) }.sorted()
+        let start = points.last(where: { $0 <= p }) ?? 0
+        let end = points.first(where: { $0 > p }) ?? (song.length ?? transport.length)
+        guard end - start > 0.25 else { return }
+        transport.setLoop(start...end)
+    }
+
+    func updateSetlist(_ setlist: Setlist) {
+        edit { show in
+            guard let i = show.setlists.firstIndex(where: { $0.id == setlist.id }) else { return }
+            show.setlists[i] = setlist
+        }
+    }
+
+    func duplicateSetlist(_ setlist: Setlist) {
+        let copy = Setlist(name: "\(setlist.name) copy", songIDs: setlist.songIDs, skipped: setlist.skipped)
+        edit { $0.setlists.append(copy) }
+        selectedSetlistID = copy.id
+    }
+
+    func newSetlist() {
+        guard let show else { return }
+        let list = Setlist(name: "New setlist", songIDs: show.songs.map(\.id))
+        edit { $0.setlists.append(list) }
+        selectedSetlistID = list.id
+    }
+
+    func deleteSetlist(_ setlist: Setlist) {
+        guard let show, show.setlists.count > 1 else { return }
+        edit { $0.setlists.removeAll { $0.id == setlist.id } }
+        if selectedSetlistID == setlist.id { selectedSetlistID = self.show?.setlists.first?.id }
+    }
+
+    func toggleSkip(_ song: Song) {
+        guard var list = setlist else { return }
+        if list.skipped.contains(song.id) { list.skipped.remove(song.id) } else { list.skipped.insert(song.id) }
+        updateSetlist(list)
+    }
+
+    func select(setlist: Setlist) {
+        selectedSetlistID = setlist.id
+        if let current = currentSong, !queue.contains(where: { $0.id == current.id }), let first = queue.first, !transport.isPlaying {
+            cue(first)
+        }
+    }
+
+    // MARK: Output
+
+    func updateRouting(_ change: (inout OutputRouting) -> Void) {
+        guard var show else { return }
+        let before = show.routing
+        change(&show.routing)
+        self.show = show
         save()
+        if before.deviceUID != show.routing.deviceUID {
+            transport.configure(routing: show.routing)
+        } else {
+            transport.applyRouting(show.routing)
+        }
+    }
+
+    /// True when the show still needs a timecode output chosen.
+    var needsTimecodeOutput: Bool { show != nil && show?.routing.timecodeChannel == nil }
+
+    // MARK: Go to timecode
+
+    /// Finds the song that holds `text` (a timecode), cues it and moves the playhead there.
+    /// Returns a message when it can't.
+    func goTo(timecode text: String) -> String? {
+        guard let show else { return "Open a show first." }
+        let songs = queue.isEmpty ? show.songs : queue
+        for song in songs {
+            guard let tc = Timecode(text, rate: song.rate) else { continue }
+            let offset = Double(tc.frames(since: song.start)) / song.rate.framesPerSecond
+            if offset >= -song.fileOffset && offset <= (song.length ?? 0) {
+                if currentSong?.id != song.id { cue(song, play: false) }
+                transport.locate(offset)
+                return nil
+            }
+        }
+        if Timecode(text, rate: show.defaultRate) == nil { return "That isn't a timecode. Use HH:MM:SS:FF." }
+        return "No song in this setlist plays at \(text)."
     }
 
     // MARK: Import, open, save
 
     func chooseFolder() {
+        guard !locked else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
@@ -318,10 +394,14 @@ final class AppModel: ObservableObject {
     func openImported(_ report: ImportReport) {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Vivid Playback")
         let package = docs.appendingPathComponent("\(report.show.name).\(ShowStore.fileExtension)")
-        load(report.show, package: package, issues: report.issues)
+        var show = report.show
+        // Start on this Mac's interface; Caiden picks the timecode output once.
+        if show.routing.deviceUID == nil { show.routing.deviceUID = AudioDevices.defaultOutput()?.uid }
+        load(show, package: package, issues: report.issues)
         save()
         importState = .idle
         go(.library)
+        if needsTimecodeOutput { outputShown = true }
     }
 
     func open(package: URL) {
@@ -329,28 +409,40 @@ final class AppModel: ObservableObject {
             let show = try ShowStore.load(from: package)
             load(show, package: package, issues: [])
             go(.library)
-            // Re-check the files in the background: they may have changed since the last session.
-            let reader = self.reader
-            Task {
-                let (checked, issues) = await Task.detached { () -> (Show, [ShowIssue]) in
-                    var copy = show
-                    let result = ShowImporter(reader: reader).check(&copy)
-                    return (copy, result.issues)
-                }.value
-                self.issues = issues
-                guard var current = self.show else { return }
-                for (i, song) in current.songs.enumerated() where song.length == nil {
-                    current.songs[i].length = checked.song(id: song.id)?.length
-                }
-                self.show = current
-            }
+            recheck()
         } catch {
             importState = .failed("Couldn't open \(package.lastPathComponent): \(error.localizedDescription)")
             screen = .firstRun
         }
     }
 
+    /// Re-reads every song's files in the background: they may have changed or moved.
+    func recheck() {
+        guard let show else { return }
+        let reader = self.reader
+        let rate = transport.audio.isRunning ? transport.audio.sampleRate : nil
+        Task {
+            let (checked, issues) = await Task.detached { () -> (Show, [ShowIssue]) in
+                var copy = show
+                let result = ShowImporter(reader: reader).check(&copy, deviceSampleRate: rate)
+                for (i, song) in copy.songs.enumerated() where copy.songs[i].timecodeFileChannel == nil {
+                    copy.songs[i].timecodeFileChannel = result.channels[song.id]
+                }
+                return (copy, result.issues)
+            }.value
+            self.issues = issues
+            guard var current = self.show else { return }
+            for (i, song) in current.songs.enumerated() {
+                guard let fresh = checked.song(id: song.id) else { continue }
+                if song.length == nil { current.songs[i].length = fresh.length }
+                if song.timecodeFileChannel == nil { current.songs[i].timecodeFileChannel = fresh.timecodeFileChannel }
+            }
+            self.show = current
+        }
+    }
+
     func openShowPanel() {
+        guard !locked else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -359,13 +451,32 @@ final class AppModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url { open(package: url) }
     }
 
+    /// Points the show at a folder its files moved to, then checks everything again.
+    func relink() {
+        guard !locked, show != nil else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Use This Folder"
+        panel.message = "Choose the folder the show's masters and timecode files are in now."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        edit { $0.mediaFolder = url.standardizedFileURL.path }
+        transport.invalidateCache()
+        waveforms = [:]
+        if let song = currentSong { cue(song, play: false) }
+        recheck()
+    }
+
     private func load(_ show: Show, package: URL, issues: [ShowIssue]) {
+        transport.pause()
         self.show = show
         self.packageURL = package
         self.issues = issues
         self.selectedSetlistID = show.setlists.first?.id
         waveforms = [:]
-        if let first = queue.first { cue(first) }
+        transport.invalidateCache()
+        transport.configure(routing: show.routing)
+        if let first = queue.first { cue(first, play: false) }
         UserDefaults.standard.set(package.path, forKey: "lastShowPath")
     }
 
@@ -382,9 +493,42 @@ final class AppModel: ObservableObject {
     }
 
     func newShow() {
+        guard !locked else { return }
         transport.pause()
         importState = .idle
         go(.firstRun)
+    }
+
+    private func runDemo(_ name: String) {
+        let target: Screen
+        switch name {
+        case "library": target = .library
+        case "timeline": target = .timeline
+        case "clock": target = .clock
+        default: return
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
+        let reader = self.reader
+        Task {
+            guard let report = try? await Task.detached(operation: { () -> ImportReport in
+                try ExampleShow.write(to: folder)
+                return try ShowImporter(reader: reader).importFolder(folder, name: "Example Tour 2027")
+            }).value else { return }
+            var show = report.show
+            show.routing.timecodeChannel = 2
+            if target == .timeline, show.songs.count > 2 {
+                let song = show.songs[2]
+                show.songs[2].markers = [(0.4, "Hit 1"), (5, "Verse 1"), (11, "Chorus · big look"), (17, "Bridge · blackout")].map {
+                    Marker(time: song.start.adding(frames: Int($0.0 * song.rate.framesPerSecond)), label: $0.1)
+                }
+            }
+            load(show, package: folder.appendingPathComponent("Example.vividshow"), issues: report.issues)
+            if let third = queue.dropFirst(2).first { cue(third, play: false) }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            transport.locate(9.4)
+            screen = target
+            transport.play()
+        }
     }
 
     // MARK: Waveforms

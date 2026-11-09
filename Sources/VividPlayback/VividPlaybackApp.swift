@@ -29,39 +29,72 @@ struct VividPlaybackApp: App {
 
 @MainActor
 struct PlaybackCommands: Commands {
-    let model: AppModel
+    @ObservedObject var model: AppModel
 
     var body: some Commands {
+        let typing = model.sheetOpen
         CommandGroup(replacing: .newItem) {
             Button("New Show…") { model.newShow() }
                 .keyboardShortcut("n")
+                .disabled(model.locked)
             Button("Open Show…") { model.openShowPanel() }
                 .keyboardShortcut("o")
+                .disabled(model.locked)
             Button("Import Show Folder…") { model.chooseFolder() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+                .disabled(model.locked)
+            Divider()
+            Button("Relink Media Folder…") { model.relink() }
+                .disabled(model.locked || model.show == nil)
+            Button("Check Files Again") { model.recheck() }
+                .disabled(model.show == nil)
         }
         CommandMenu("Playback") {
             Button("Play or Pause") { model.transport.toggle() }
                 .keyboardShortcut(.space, modifiers: [])
+                .disabled(typing)
             Button("Next Song") { model.next() }
                 .keyboardShortcut(.rightArrow, modifiers: [])
+                .disabled(typing)
             Button("Previous Song") { model.previous() }
                 .keyboardShortcut(.leftArrow, modifiers: [])
-            Button("Back to the Top of the Song") { model.transport.locate(0) }
+                .disabled(typing)
+            Button("Back to the Top of the Song") { model.transport.locate(model.transport.lowerBound) }
                 .keyboardShortcut(.leftArrow, modifiers: [.command])
+                .disabled(typing)
+            Button("Go to Timecode…") { model.goToShown = true }
+                .keyboardShortcut("g")
+                .disabled(model.show == nil)
             Divider()
+            Button(model.transport.loop == nil ? "Loop Between Markers" : "Stop Looping") { model.toggleLoop() }
+                .keyboardShortcut("l", modifiers: [])
+                .disabled(typing || model.show == nil)
             Button("Add Marker") { model.addMarker() }
                 .keyboardShortcut("m", modifiers: [])
+                .disabled(typing || model.locked || model.screen != .timeline)
+            Divider()
+            Toggle("Stop After Each Song", isOn: $model.stopAfterEach)
+            Toggle("Show Mode (Lock Editing)", isOn: $model.locked)
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            Divider()
+            Button("Audio Output…") { model.outputShown = true }
+                .keyboardShortcut("o", modifiers: [.command, .option])
+                .disabled(model.show == nil)
+            Button("Edit Setlist…") { model.setlistEditorShown = true }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(model.locked || model.show == nil)
         }
         CommandGroup(before: .toolbar) {
             Button("Song Timeline") { model.toggleTimeline() }
                 .keyboardShortcut("t")
             Button("Open or Close Song Timeline") { model.toggleTimeline() }
                 .keyboardShortcut(.return, modifiers: [])
+                .disabled(typing)
             Button("Clock") { model.toggleClock() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Button("Library") { model.go(.library) }
                 .keyboardShortcut(.escape, modifiers: [])
+                .disabled(typing)
             Button("Show Issues") { model.issuesShown = true }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
             Divider()
@@ -71,10 +104,11 @@ struct PlaybackCommands: Commands {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var transport: Transport
     @Namespace private var morph
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             if model.screen == .clock {
                 Color.black.ignoresSafeArea()
             } else {
@@ -90,9 +124,38 @@ struct RootView: View {
             case .clock:
                 ClockScreen(morph: morph).transition(.opacity)
             }
+            if case .lost(let message) = transport.status, model.screen != .firstRun {
+                LostOutputBanner(message: message)
+                    .padding(.top, 78)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .background(Brand.window)
         .ignoresSafeArea()
+        .animation(.vivid(0.4), value: transport.status)
         .sheet(isPresented: $model.issuesShown) { IssuesSheet().environmentObject(model) }
+        .sheet(isPresented: $model.outputShown) { OutputSheet().environmentObject(model).environmentObject(transport) }
+        .sheet(isPresented: $model.setlistEditorShown) { SetlistEditor().environmentObject(model) }
+        .sheet(isPresented: $model.goToShown) { GoToSheet().environmentObject(model) }
+        .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song).environmentObject(model) }
+    }
+}
+
+/// Alerts are solid, never glass.
+struct LostOutputBanner: View {
+    @EnvironmentObject private var model: AppModel
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(hex: 0xFFB4A8))
+            Text(message).font(.manrope(13.5, .semibold)).foregroundStyle(Brand.ink)
+            Button("Audio output…") { model.outputShown = true }.buttonStyle(QuietButtonStyle())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: 0x5A1E1E)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(hex: 0xC4574A), lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 }

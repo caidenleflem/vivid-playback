@@ -38,7 +38,7 @@ jobs:
           lipo -info "$APP/Contents/MacOS/Vivid Playback"
           /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$APP/Contents/Info.plist"
           codesign --verify --deep --verbose=2 "$APP"
-          ls "$APP/Contents/Resources/Fonts" "$APP/Contents/Resources/Images"
+          ls "$APP/Contents/Resources/Fonts" "$APP/Contents/Resources/Images" "$APP/Contents/Resources/AppIcon.icns"
 
       - name: Launch it on each screen and take screenshots
         run: |
