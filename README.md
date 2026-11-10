@@ -55,6 +55,17 @@ lane for an executor. Choose its page and executor, what it does (Go+, Go−, To
 fader level, or any command line) and which consoles it fires. Each lane is a row under the
 waveform. Click a lane, then **C** drops a trigger at the playhead; double-click a lane to drop
 one anywhere, drag a trigger to move it, right-click for level, nudge, fire now or delete.
+**Key it in live:** give each lane a key (new lanes get 1, 2, 3…; change it in Edit Lane).
+Play the song and press a lane's key: a trigger lands on that lane at the frame you heard when
+you pressed it. With **Keys fire the console** on, the executor also goes as you press, so you
+see the look while you program. **Delete** takes back the selected trigger, which is always the
+last one you dropped.
+
+**Zoom:** pinch over the timeline, ⌘-scroll, or **⌘=** / **⌘−** (**⌘0** fits the whole song).
+Two-finger swipe or the bar under the ruler moves along; while playing it pages with the
+playhead. Click a marker or trigger to select it, drag it to move it (it lands on a whole
+frame), **⌥← ⌥→** nudge it a frame (**⇧** for ten), **Delete** removes it.
+
 Triggers fire over OSC on time with the music you hear (the same clock as the timecode), and
 flash gold as they go. Lanes belong to the show; each song has its own triggers.
 

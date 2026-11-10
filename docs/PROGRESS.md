@@ -268,3 +268,23 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 - grandMA3 OSC: `/gma3/cmd` with a command string needs Receive Command on; fader lanes use
   `/gma3/Page{p}/Fader{e}` with 0–100. **Needs a check on a real console** (or onPC).
 - 88 tests pass.
+
+## 2026-11-10: lane keys, zoom, selection
+
+- Each lane can have a key (core: `TriggerLane.key`, `normalizedKey`, `freeKey`; Space, M, L and
+  C are reserved). New lanes get the next free key from 1 2 3… Pressing it in the timeline drops
+  a trigger at the position heard when the key went down (the event's timestamp, not when it was
+  handled). Key repeat is ignored. "Keys fire the console" (per Mac, on by default) also fires
+  the executor as you press it. Lane editor has a key recorder (Esc cancels, Delete clears); a
+  key moves from another lane if reused.
+- Zoom (core: `TimelineWindow`, tested): up to 200×, pinch or ⌘/⌥-scroll around the pointer,
+  ⌘= ⌘− ⌘0, swipe or the overview bar to pan, paging with the playhead while playing. Ruler
+  spacing adapts down to frames. Waveform peaks are now 100 per second, drawn for the visible
+  stretch, and placed in song time (the file offset is taken into account; before, the whole
+  file was stretched across the lane).
+- Selection: click a marker or trigger to select it (gold outline); drag to move (snaps to a
+  frame); ⌥← ⌥→ nudge 1 frame (⇧ 10); Delete removes it. New markers and triggers are selected,
+  so Delete undoes the last one keyed in. Plain markers can now be dragged and nudged too.
+- Settings saved by older versions now load (missing fields take defaults). The previous build
+  could reset this Mac's Connections settings once on upgrade.
+- 92 tests pass.

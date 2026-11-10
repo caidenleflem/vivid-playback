@@ -36,16 +36,36 @@ struct AVAudioFileReader: AudioFileReading {
     }
 }
 
+/// Peak levels through a master file, `perSecond` buckets for each second of the file.
+struct WaveformData {
+    var peaks: [Float] = []
+    var perSecond: Double = 1
+
+    /// The loudest peak between two times in the file (seconds), 0...1.
+    func peak(from t0: Double, to t1: Double) -> Float {
+        guard !peaks.isEmpty else { return 0 }
+        let a = max(0, Int(t0 * perSecond)), b = min(peaks.count - 1, Int(t1 * perSecond))
+        guard a < peaks.count, b >= 0 else { return 0 }
+        if b <= a { return peaks[min(a, peaks.count - 1)] }
+        var m: Float = 0
+        for i in a...b where peaks[i] > m { m = peaks[i] }
+        return m
+    }
+}
+
 enum Waveform {
-    /// Peak level per bucket across all channels, 0...1.
-    static func peaks(of url: URL, buckets: Int = 1400) -> [Float] {
-        guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return [] }
+    /// Peak level per bucket across all channels, 0...1: 100 buckets a second (fine enough to
+    /// zoom to a frame), at most 60 000.
+    static func peaks(of url: URL) -> WaveformData {
+        guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return WaveformData() }
         let format = file.processingFormat
         let total = Int(file.length)
+        let seconds = Double(total) / format.sampleRate
+        let buckets = max(1, min(60_000, Int(seconds * 100)))
         let perBucket = max(1, total / buckets)
         var peaks = [Float](repeating: 0, count: buckets)
         let chunk: AVAudioFrameCount = 65_536
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else { return [] }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else { return WaveformData() }
         var position = 0
         while position < total {
             do { try file.read(into: buffer, frameCount: chunk) } catch { break }
@@ -64,7 +84,7 @@ enum Waveform {
             position += n
         }
         let top = max(0.0001, peaks.max() ?? 1)
-        return peaks.map { min(1, $0 / top) }
+        return WaveformData(peaks: peaks.map { min(1, $0 / top) }, perSecond: format.sampleRate / Double(perBucket))
     }
 }
 
@@ -97,7 +117,22 @@ final class AppModel: ObservableObject {
     @Published var show: Show? { didSet { syncTriggers() } }
     @Published var packageURL: URL?
     @Published var issues: [ShowIssue] = []
-    @Published var currentSongID: UUID? { didSet { syncTriggers() } }
+    @Published var currentSongID: UUID? {
+        didSet {
+            syncTriggers()
+            if currentSongID != oldValue {
+                selectedMarkerID = nil
+                timelineWindow = TimelineWindow(length: currentSong?.length ?? 1)
+            }
+        }
+    }
+    /// The marker or trigger picked in the timeline (Delete removes it, ⌥← ⌥→ nudge it).
+    @Published var selectedMarkerID: UUID?
+    /// How far the timeline is zoomed in, and where.
+    @Published var timelineWindow = TimelineWindow(length: 1)
+    /// Where the timeline's tracks sit in the window (top-left coordinates), for trackpad zoom.
+    var timelineTrackFrame: CGRect = .zero
+    private var eventMonitor: Any?
     /// The executor lane C adds triggers to.
     @Published var selectedLaneID: UUID?
     /// The lane being edited (a new one has no saved copy yet).
@@ -108,7 +143,7 @@ final class AppModel: ObservableObject {
     var connectionsAnchor: String?
     @Published var showsShowTimecode = true
     @Published var importState: ImportState = .idle
-    @Published var waveforms: [UUID: [Float]] = [:]
+    @Published var waveforms: [UUID: WaveformData] = [:]
     @Published var issuesShown = false
     @Published var outputShown = false
     @Published var setlistEditorShown = false
@@ -152,6 +187,10 @@ final class AppModel: ObservableObject {
         }
         control.followRate = { [weak self] in self?.show?.defaultRate ?? .fps30 }
         control.onTriggerSettingsChange = { [weak self] in self?.syncTriggers() }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .magnify]) { [weak self] event in
+            guard let self else { return event }
+            return self.handle(event) ? nil : event
+        }
         refreshDevices()
         AudioDevices.observeChanges { [weak self] in
             Task { @MainActor in
@@ -407,7 +446,9 @@ final class AppModel: ObservableObject {
         withAnimation(.vivid(0.45)) {
             edit { show in
                 guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
-                show.songs[i].markers.append(Marker(time: tc, label: "Marker \(show.songs[i].markers.filter { $0.laneID == nil }.count + 1)"))
+                let marker = Marker(time: tc, label: "Marker \(show.songs[i].markers.filter { $0.laneID == nil }.count + 1)")
+                show.songs[i].markers.append(marker)
+                selectedMarkerID = marker.id
                 show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
             }
         }
@@ -430,6 +471,7 @@ final class AppModel: ObservableObject {
                 show.songs[s].markers.removeAll { $0.id == marker.id }
             }
         }
+        if selectedMarkerID == marker.id { selectedMarkerID = nil }
     }
 
     func seconds(of marker: Marker, in song: Song) -> Double {
@@ -540,12 +582,17 @@ final class AppModel: ObservableObject {
 
     func newLane() {
         let next = (lanes.map(\.executor).max() ?? 200) + 1
-        laneEdit = TriggerLane(page: lanes.last?.page ?? 1, executor: next, color: lanes.count % 6)
+        laneEdit = TriggerLane(page: lanes.last?.page ?? 1, executor: next, color: lanes.count % 6,
+                               key: TriggerLane.freeKey(in: lanes))
     }
 
     func saveLane(_ lane: TriggerLane) {
         edit { show in
             var list = show.triggerLanes ?? []
+            // A key belongs to one lane: giving it to this one takes it off any other.
+            if let key = lane.key {
+                for j in list.indices where list[j].id != lane.id && list[j].key == key { list[j].key = nil }
+            }
             if let i = list.firstIndex(where: { $0.id == lane.id }) { list[i] = lane } else { list.append(lane) }
             show.triggerLanes = list
         }
@@ -568,9 +615,10 @@ final class AppModel: ObservableObject {
 
     /// C in the timeline: a trigger at the playhead on the selected lane (or, with `at`, on
     /// `lane` at that point in the song: double-clicking a lane).
-    func addTrigger(on target: TriggerLane? = nil, at seconds: Double? = nil) {
-        guard screen == .timeline, !locked, let song = currentSong else { return }
-        guard let lane = target ?? selectedLane else { newLane(); return }
+    @discardableResult
+    func addTrigger(on target: TriggerLane? = nil, at seconds: Double? = nil) -> Marker? {
+        guard screen == .timeline, !locked, let song = currentSong else { return nil }
+        guard let lane = target ?? selectedLane else { newLane(); return nil }
         selectedLaneID = lane.id
         let tc = timecode(for: song, at: max(0, seconds ?? transport.position()))
         let count = song.markers.filter { $0.laneID == lane.id }.count + 1
@@ -583,6 +631,8 @@ final class AppModel: ObservableObject {
                 show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
             }
         }
+        selectedMarkerID = marker.id
+        return marker
     }
 
     func updateMarker(_ marker: Marker, in song: Song, _ change: (inout Marker) -> Void) {
@@ -619,6 +669,109 @@ final class AppModel: ObservableObject {
 
     func fireLane(_ lane: TriggerLane) {
         control.triggers.fire(lane: lane, marker: nil)
+    }
+
+    // MARK: Timeline keys, zoom and selection
+
+    var selectedMarker: Marker? { currentSong?.markers.first { $0.id == selectedMarkerID } }
+
+    /// Keys and trackpad gestures for the timeline. Returns true when the event was used.
+    private func handle(_ event: NSEvent) -> Bool {
+        guard screen == .timeline, !sheetOpen, show != nil, event.window == NSApp.mainWindow || event.window?.isKeyWindow == true else { return false }
+        switch event.type {
+        case .keyDown: return handleKey(event)
+        case .scrollWheel: return handleScroll(event)
+        case .magnify: return handleMagnify(event)
+        default: return false
+        }
+    }
+
+    private func handleKey(_ event: NSEvent) -> Bool {
+        if let field = event.window?.firstResponder as? NSTextView, field.isEditable { return false }
+        let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        // ⌥← ⌥→ nudge the selected marker a frame (with ⇧, ten frames).
+        if event.keyCode == 123 || event.keyCode == 124, mods.contains(.option), !mods.contains(.command), !mods.contains(.control) {
+            guard !locked, let song = currentSong, let marker = selectedMarker else { return false }
+            let step = (mods.contains(.shift) ? 10 : 1) * (event.keyCode == 123 ? -1 : 1)
+            nudge(marker, in: song, frames: step)
+            return true
+        }
+        guard mods.subtracting(.shift).isEmpty else { return false }
+        // Delete removes the selected marker or trigger (the last one added, while keying in).
+        if event.keyCode == 51 || event.keyCode == 117 {
+            guard !locked, let song = currentSong, let marker = selectedMarker else { return false }
+            deleteMarker(marker, in: song)
+            return true
+        }
+        guard !locked, let chars = event.charactersIgnoringModifiers, let key = TriggerLane.normalizedKey(chars),
+              let lane = lanes.first(where: { $0.key == key }) else { return false }
+        if event.isARepeat { return true }
+        // Where the music was when the key went down, not when the event got here.
+        let late = transport.isPlaying ? max(0, min(0.25, CACurrentMediaTime() - event.timestamp)) : 0
+        guard let marker = addTrigger(on: lane, at: transport.position() - late) else { return true }
+        if control.settings.keysFire && !lane.muted { control.triggers.fire(lane: lane, marker: marker) }
+        control.flash(marker.id)
+        return true
+    }
+
+    /// Two fingers sideways (or a mouse wheel) pans; with ⌘ or ⌥ it zooms.
+    private func handleScroll(_ event: NSEvent) -> Bool {
+        guard let x = trackX(event) else { return false }
+        let width = Double(timelineTrackFrame.width)
+        let precise = event.hasPreciseScrollingDeltas
+        let dx = Double(event.scrollingDeltaX) * (precise ? 1 : 10)
+        let dy = Double(event.scrollingDeltaY) * (precise ? 1 : 10)
+        var w = timelineWindow
+        if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
+            w.zoom(by: exp(dy * 0.01), around: w.time(atX: x, width: width))
+        } else {
+            guard w.isZoomed else { return false }
+            let delta = abs(dx) >= abs(dy) ? dx : dy
+            w.pan(by: -delta / max(width, 1) * w.span)
+        }
+        if w != timelineWindow { timelineWindow = w }
+        return true
+    }
+
+    /// Pinch to zoom, around the pointer.
+    private func handleMagnify(_ event: NSEvent) -> Bool {
+        guard let x = trackX(event) else { return false }
+        var w = timelineWindow
+        w.zoom(by: 1 + Double(event.magnification), around: w.time(atX: x, width: Double(timelineTrackFrame.width)))
+        timelineWindow = w
+        return true
+    }
+
+    /// The pointer's distance from the left of the tracks, when it's over the timeline.
+    private func trackX(_ event: NSEvent) -> Double? {
+        guard let content = event.window?.contentView, timelineTrackFrame.width > 0 else { return nil }
+        let p = event.locationInWindow
+        let y = content.bounds.height - p.y
+        let frame = timelineTrackFrame
+        guard y >= frame.minY - 40, y <= frame.maxY + 20, p.x >= frame.minX - 200, p.x <= frame.maxX + 20 else { return nil }
+        return min(Double(frame.width), max(0, Double(p.x - frame.minX)))
+    }
+
+    func zoomTimeline(by factor: Double) {
+        guard let song = currentSong else { return }
+        var w = timelineWindow
+        w.length = max(0.001, song.length ?? 1)
+        let p = transport.position()
+        w.zoom(by: factor, around: w.contains(p) ? p : w.start + w.span / 2)
+        withAnimation(.vivid(0.3)) { timelineWindow = w }
+    }
+
+    func zoomToFit() {
+        var w = timelineWindow
+        w.fit()
+        withAnimation(.vivid(0.35)) { timelineWindow = w }
+    }
+
+    /// Moves the timeline so `seconds` is in view (after following the playhead, or dragging the overview).
+    func showInTimeline(start seconds: Double) {
+        var w = timelineWindow
+        w.pan(by: seconds - w.start)
+        if w != timelineWindow { timelineWindow = w }
     }
 
     // MARK: Remote control and following timecode
@@ -876,6 +1029,7 @@ final class AppModel: ObservableObject {
     }
 
     func tryExampleShow() {
+        let zoomIn = demoZoom
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
         importState = .running(.scanning)
         Task {
@@ -1041,10 +1195,12 @@ final class AppModel: ObservableObject {
     }
 
     private func runDemo(_ name: String) {
+        var demoZoom = false
         let target: Screen
         switch name {
         case "library": target = .library
         case "timeline": target = .timeline
+        case "zoomed": target = .timeline; demoZoom = true
         case "clock": target = .clock
         case "connections": target = .connections
         case "consoles": target = .connections; connectionsAnchor = "consoles"
@@ -1075,9 +1231,9 @@ final class AppModel: ObservableObject {
             if target == .timeline, show.songs.count > 2 {
                 let song = show.songs[2]
                 let fps = song.rate.framesPerSecond
-                let main = TriggerLane(name: "Main cues", page: 1, executor: 201, color: 0)
-                let strobes = TriggerLane(name: "Strobes", page: 1, executor: 202, action: .fader, color: 2)
-                let video = TriggerLane(name: "Video", page: 2, executor: 101, color: 4)
+                let main = TriggerLane(name: "Main cues", page: 1, executor: 201, color: 0, key: "1")
+                let strobes = TriggerLane(name: "Strobes", page: 1, executor: 202, action: .fader, color: 2, key: "2")
+                let video = TriggerLane(name: "Video", page: 2, executor: 101, color: 4, key: "3")
                 show.triggerLanes = [main, strobes, video]
                 func at(_ t: Double, _ lane: TriggerLane, _ label: String, _ value: Double? = nil) -> Marker {
                     Marker(time: song.start.adding(frames: Int(t * fps)), label: label, laneID: lane.id, value: value)
@@ -1101,6 +1257,12 @@ final class AppModel: ObservableObject {
             if let third = queue.dropFirst(2).first { cue(third, play: false) }
             try? await Task.sleep(nanoseconds: 600_000_000)
             transport.locate(9.4)
+            if zoomIn, let song = currentSong {
+                var w = TimelineWindow(length: song.length ?? 24)
+                w.setZoom(3, around: 9.4)
+                timelineWindow = w
+                selectedMarkerID = song.markers.first { $0.label == "Go+ 3" }?.id
+            }
             screen = target
             transport.play()
         }

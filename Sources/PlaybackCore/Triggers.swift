@@ -56,9 +56,11 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
     public var consoleIDs: [UUID]
     public var color: Int
     public var muted: Bool
+    /// The key that drops a trigger on this lane at the playhead (one lowercase character).
+    public var key: String?
 
     public init(id: UUID = UUID(), name: String = "", page: Int = 1, executor: Int = 201, action: LaneAction = .goPlus,
-                command: String? = nil, consoleIDs: [UUID] = [], color: Int = 0, muted: Bool = false) {
+                command: String? = nil, consoleIDs: [UUID] = [], color: Int = 0, muted: Bool = false, key: String? = nil) {
         self.id = id
         self.name = name
         self.page = page
@@ -68,6 +70,27 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
         self.consoleIDs = consoleIDs
         self.color = color
         self.muted = muted
+        self.key = key.flatMap(TriggerLane.normalizedKey)
+    }
+
+    /// Keys the timeline already uses: Space, M (marker), L (loop), C (trigger on the chosen lane).
+    public static let reservedKeys: Set<String> = [" ", "m", "l", "c"]
+    /// Keys handed to new lanes, in order.
+    public static let keyOrder = Array("1234567890qwertyuiopasdfghjkzxvbn").map(String.init)
+
+    /// One letter, digit or symbol, lowercased; nil for anything else or a reserved key.
+    public static func normalizedKey(_ text: String) -> String? {
+        let t = text.lowercased()
+        guard t.count == 1, let c = t.first, !c.isWhitespace, !c.isNewline,
+              c.unicodeScalars.allSatisfy({ $0.value >= 0x21 && $0.value < 0xF700 }),
+              !reservedKeys.contains(t) else { return nil }
+        return t
+    }
+
+    /// The first key no lane uses yet.
+    public static func freeKey(in lanes: [TriggerLane]) -> String? {
+        let used = Set(lanes.compactMap(\.key))
+        return keyOrder.first { !used.contains($0) }
     }
 
     /// "1.201 · Go+", or the lane's own name.

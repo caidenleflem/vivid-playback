@@ -115,6 +115,16 @@ struct PlaybackCommands: Commands {
             Button("Open or Close Song Timeline") { model.toggleTimeline() }
                 .keyboardShortcut(.return, modifiers: [])
                 .disabled(typing)
+            Button("Zoom In") { model.zoomTimeline(by: 2) }
+                .keyboardShortcut("=", modifiers: [.command])
+                .disabled(model.screen != .timeline)
+            Button("Zoom Out") { model.zoomTimeline(by: 0.5) }
+                .keyboardShortcut("-", modifiers: [.command])
+                .disabled(model.screen != .timeline || !model.timelineWindow.isZoomed)
+            Button("Zoom to Fit") { model.zoomToFit() }
+                .keyboardShortcut("0", modifiers: [.command])
+                .disabled(model.screen != .timeline || !model.timelineWindow.isZoomed)
+            Divider()
             Button("Clock") { model.toggleClock() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Button("Albums") { model.go(.albums) }

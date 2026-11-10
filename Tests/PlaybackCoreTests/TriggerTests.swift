@@ -66,3 +66,60 @@ final class TriggerTests: XCTestCase {
         XCTAssertEqual(back.songs[0].markers[0].value, 80)
     }
 }
+
+final class LaneKeyAndWindowTests: XCTestCase {
+    func testLaneKeys() {
+        XCTAssertEqual(TriggerLane.normalizedKey("Q"), "q")
+        XCTAssertEqual(TriggerLane.normalizedKey("1"), "1")
+        XCTAssertNil(TriggerLane.normalizedKey("m"))
+        XCTAssertNil(TriggerLane.normalizedKey("C"))
+        XCTAssertNil(TriggerLane.normalizedKey(" "))
+        XCTAssertNil(TriggerLane.normalizedKey("ab"))
+        XCTAssertNil(TriggerLane.normalizedKey("\u{F702}"))   // an arrow key
+        XCTAssertEqual(TriggerLane(key: "M").key, nil)
+        let lanes = [TriggerLane(key: "1"), TriggerLane(key: "3")]
+        XCTAssertEqual(TriggerLane.freeKey(in: lanes), "2")
+        // Lanes saved before keys existed still load.
+        let old = #"{"id":"\#(UUID().uuidString)","name":"","page":1,"executor":201,"action":"goPlus","consoleIDs":[],"color":0,"muted":false}"#
+        let lane = try? JSONDecoder().decode(TriggerLane.self, from: Data(old.utf8))
+        XCTAssertNotNil(lane)
+        XCTAssertNil(lane?.key)
+    }
+
+    func testWindowZoomKeepsAnchorStill() {
+        var w = TimelineWindow(length: 200)
+        XCTAssertEqual(w.x(50, width: 1000), 250, accuracy: 1e-9)
+        w.setZoom(4, around: 50)
+        XCTAssertEqual(w.span, 50, accuracy: 1e-9)
+        XCTAssertEqual(w.x(50, width: 1000), 250, accuracy: 1e-9)   // still under the pointer
+        XCTAssertEqual(w.time(atX: 250, width: 1000), 50, accuracy: 1e-9)
+        w.pan(by: 1000)
+        XCTAssertEqual(w.end, 200, accuracy: 1e-9)                // clamped to the song
+        w.pan(by: -1000)
+        XCTAssertEqual(w.start, 0, accuracy: 1e-9)
+        w.setZoom(0.1, around: 10)
+        XCTAssertEqual(w.zoom, 1)
+        w.setZoom(10_000, around: 10)
+        XCTAssertEqual(w.zoom, TimelineWindow.maxZoom)
+    }
+
+    func testWindowFollowsThePlayhead() {
+        var w = TimelineWindow(length: 100, zoom: 10, start: 0)   // 10 s span
+        w.follow(5)
+        XCTAssertEqual(w.start, 0)
+        w.follow(9.5)
+        XCTAssertEqual(w.start, 8.5, accuracy: 1e-9)
+        w.follow(60)
+        XCTAssertEqual(w.start, 55, accuracy: 1e-9)
+        var whole = TimelineWindow(length: 100)
+        whole.follow(99)
+        XCTAssertEqual(whole.start, 0)
+    }
+
+    func testTickStepShrinksWithZoom() {
+        let whole = TimelineWindow(length: 240)
+        XCTAssertEqual(whole.tickStep(width: 1000), 30)
+        let close = TimelineWindow(length: 240, zoom: 200)        // 1.2 s across
+        XCTAssertLessThan(close.tickStep(width: 1000), 0.5)
+    }
+}

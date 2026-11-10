@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import PlaybackCore
 
 /// A plain solid sheet: title, a line of help, content, Done.
@@ -405,6 +406,10 @@ struct LaneEditor: View {
                 }
             }
 
+            field("Key") {
+                KeyRecorder(key: $lane.key, others: model.lanes.filter { $0.id != lane.id })
+            }
+
             field("Action") {
                 VStack(alignment: .leading, spacing: 10) {
                     PillPicker(options: Self.actions, selection: $lane.action) { Self.short($0) }
@@ -565,5 +570,77 @@ struct LaneEditor: View {
             .font(.manrope(14, .semibold).monospacedDigit())
             .multilineTextAlignment(.center)
             .frame(width: 70)
+    }
+}
+
+/// Click, then press a key: that key drops a trigger on the lane at the playhead.
+struct KeyRecorder: View {
+    @Binding var key: String?
+    let others: [TriggerLane]
+    @State private var listening = false
+    @State private var monitor: Any?
+    @State private var problem: String?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { listening ? stop() : start() } label: {
+                HStack(spacing: 8) {
+                    Text(listening ? "Press a key…" : (key?.uppercased() ?? "None"))
+                        .font(.manrope(listening ? 13 : 15, .semibold).monospacedDigit())
+                        .foregroundStyle(listening ? Brand.gold : (key == nil ? Brand.graphite : Brand.ink))
+                        .frame(minWidth: 90)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(listening ? 0.1 : 0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Brand.gold.opacity(listening ? 0.8 : 0), lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Click, then press the key that drops triggers on this lane. Esc cancels, Delete clears it.")
+            if key != nil && !listening {
+                Button("Clear") { key = nil; problem = nil }.buttonStyle(QuietButtonStyle())
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                if let problem {
+                    Text(problem).foregroundStyle(Brand.warn)
+                } else if let key, let other = others.first(where: { $0.key == key }) {
+                    Text("Also on \(other.title). Saving moves it here.").foregroundStyle(Brand.warn)
+                } else {
+                    Text("Press it while the song plays to drop a trigger here.").foregroundStyle(Brand.graphite)
+                }
+            }
+            .font(.manrope(12))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .onDisappear(perform: stop)
+    }
+
+    private func start() {
+        problem = nil
+        listening = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            switch event.keyCode {
+            case 53: stop()                                   // Esc
+            case 51, 117: key = nil; stop()                   // Delete
+            default:
+                let mods = event.modifierFlags.intersection([.command, .control, .option])
+                guard mods.isEmpty, let chars = event.charactersIgnoringModifiers else { return nil }
+                if let k = TriggerLane.normalizedKey(chars) {
+                    key = k
+                    stop()
+                } else {
+                    problem = TriggerLane.reservedKeys.contains(chars.lowercased())
+                        ? "Space, M, L and C are already used in the timeline. Pick another."
+                        : "That key can't be used. Pick a letter, number or symbol."
+                }
+            }
+            return nil
+        }
+    }
+
+    private func stop() {
+        listening = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 }

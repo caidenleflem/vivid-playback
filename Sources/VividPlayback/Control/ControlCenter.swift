@@ -19,6 +19,31 @@ struct ControlSettings: Codable, Equatable {
     var ltcInputChannel = 1
     var consoles: [ConsoleTarget] = []
     var fireEarlyMs: Double = 0
+    /// A lane's key also fires its executor on the console as it records the trigger.
+    var keysFire = true
+
+    init() {}
+
+    /// Settings saved by an older version load with defaults for anything new.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = ControlSettings()
+        mtcOut = try c.decodeIfPresent(Bool.self, forKey: .mtcOut) ?? d.mtcOut
+        mtcDestination = try c.decodeIfPresent(Int32.self, forKey: .mtcDestination)
+        artNetOut = try c.decodeIfPresent(Bool.self, forKey: .artNetOut) ?? d.artNetOut
+        artNetTarget = try c.decodeIfPresent(String.self, forKey: .artNetTarget) ?? d.artNetTarget
+        oscIn = try c.decodeIfPresent(Bool.self, forKey: .oscIn) ?? d.oscIn
+        oscPort = try c.decodeIfPresent(UInt16.self, forKey: .oscPort) ?? d.oscPort
+        midiRemote = try c.decodeIfPresent(Bool.self, forKey: .midiRemote) ?? d.midiRemote
+        mmc = try c.decodeIfPresent(Bool.self, forKey: .mmc) ?? d.mmc
+        midiMap = try c.decodeIfPresent([String: MIDITrigger].self, forKey: .midiMap) ?? d.midiMap
+        follow = try c.decodeIfPresent(FollowSource.self, forKey: .follow) ?? d.follow
+        ltcInputUID = try c.decodeIfPresent(String.self, forKey: .ltcInputUID)
+        ltcInputChannel = try c.decodeIfPresent(Int.self, forKey: .ltcInputChannel) ?? d.ltcInputChannel
+        consoles = try c.decodeIfPresent([ConsoleTarget].self, forKey: .consoles) ?? d.consoles
+        fireEarlyMs = try c.decodeIfPresent(Double.self, forKey: .fireEarlyMs) ?? d.fireEarlyMs
+        keysFire = try c.decodeIfPresent(Bool.self, forKey: .keysFire) ?? d.keysFire
+    }
 
     static func load() -> ControlSettings {
         guard let data = UserDefaults.standard.data(forKey: "controlSettings"),
@@ -111,6 +136,8 @@ final class ControlCenter: ObservableObject {
     @Published private(set) var firedAt: [UUID: Date] = [:]
     /// The last trigger sent, for the Consoles section.
     @Published private(set) var lastTrigger: (text: String, ok: Bool, at: Date)?
+    /// Lights a trigger in the timeline as if it had just fired.
+    func flash(_ id: UUID) { firedAt[id] = Date() }
     /// Set by the app model: re-arm triggers when consoles or timing change.
     var onTriggerSettingsChange: (() -> Void)?
     private let netQueue = DispatchQueue(label: "vivid.network.in", qos: .userInteractive)

@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir -p build/screens
           BIN="build/Vivid Playback.app/Contents/MacOS/Vivid Playback"
-          for screen in first-run library timeline clock connections consoles albums; do
+          for screen in first-run library timeline zoomed clock connections consoles albums; do
             if [ "$screen" = "first-run" ]; then "$BIN" > "build/screens/$screen.log" 2>&1 &
             else "$BIN" --demo "$screen" > "build/screens/$screen.log" 2>&1 & fi
             PID=$!

@@ -189,25 +189,26 @@ struct TimelinePanel: View {
                 let scrubLimit = 22 + 10 + waveHeight + 10 + 26
                 let linesBottom = lanesHeight - (lanes.isEmpty ? 0 : 32)
                 SongProgress { position, _ in
-                    let p = CGFloat(min(1, max(0, position / length)))
-                    let playheadX = trackWidth * p
+                    let win = displayWindow(length: length, playhead: position)
+                    let playheadX = CGFloat(win.x(position, width: Double(trackWidth)))
                     VStack(alignment: .leading, spacing: 10) {
-                        ruler(width: trackWidth, length: length)
+                        ruler(width: trackWidth, win: win)
                         lane("Master") {
-                            WaveformView(peaks: model.waveforms[song.id] ?? [], progress: p)
+                            WaveformView(data: model.waveforms[song.id], fileOffset: song.fileOffset,
+                                         from: win.start, to: win.end, playhead: position)
                                 .frame(height: waveHeight)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.02)))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
-                        lane("Timecode") { timecodeLane }
+                        lane("Timecode") { timecodeLane(win) }
                         if !plain.isEmpty {
-                            lane("Markers") { markerLane(plain, width: trackWidth, length: length) }
+                            lane("Markers") { markerLane(plain, width: trackWidth, win: win) }
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                         if !lanes.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 ForEach(lanes) { l in
-                                    triggerLane(l, height: laneHeight, width: trackWidth, length: length)
+                                    triggerLane(l, height: laneHeight, width: trackWidth, win: win)
                                         .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
                                 addLaneRow
@@ -226,26 +227,30 @@ struct TimelinePanel: View {
                     }
                     .overlay(alignment: .topLeading) {
                         if let loop = transport.loop {
-                            let x0 = trackWidth * CGFloat(max(0, loop.lowerBound) / length)
-                            let x1 = trackWidth * CGFloat(min(length, loop.upperBound) / length)
+                            let x0 = min(trackWidth, max(0, CGFloat(win.x(loop.lowerBound, width: Double(trackWidth)))))
+                            let x1 = min(trackWidth, max(0, CGFloat(win.x(loop.upperBound, width: Double(trackWidth)))))
                             Rectangle().fill(Brand.gold.opacity(0.08))
                                 .overlay(alignment: .top) { Rectangle().fill(Brand.gold.opacity(0.6)).frame(height: 2) }
                                 .frame(width: max(2, x1 - x0), height: linesBottom - 24)
                                 .offset(x: labelWidth + 12 + x0, y: 24)
                                 .allowsHitTesting(false)
                         }
-                        markerLines(width: trackWidth, length: length, height: linesBottom - 30)
+                        markerLines(width: trackWidth, win: win, height: linesBottom - 30)
                             .offset(x: labelWidth + 12)
-                        playhead(position: position, height: linesBottom - 18)
-                            .offset(x: labelWidth + 12 + playheadX - 1)
+                        if playheadX >= -1 && playheadX <= trackWidth + 1 {
+                            playhead(position: position, height: linesBottom - 18)
+                                .offset(x: labelWidth + 12 + playheadX - 1)
+                        }
                     }
                     .contentShape(Rectangle())
                     .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { value in
                         // Scrub on the waveform and timecode lanes; the marker and executor lanes keep their clicks.
                         let x = value.location.x - labelWidth - 12
                         guard x >= 0, trackWidth > 0, value.startLocation.y < scrubLimit else { return }
-                        transport.locate(Double(x / trackWidth) * length)
+                        transport.locate(win.time(atX: Double(min(x, trackWidth)), width: Double(trackWidth)))
                     })
+                    .onAppear { reportTrackFrame(geo, trackWidth: trackWidth) }
+                    .onChange(of: geo.frame(in: .global)) { _ in reportTrackFrame(geo, trackWidth: trackWidth) }
                 }
             }
             if plain.isEmpty && lanes.isEmpty {
@@ -280,30 +285,105 @@ struct TimelinePanel: View {
         }
     }
 
-    private func ruler(width: CGFloat, length: Double) -> some View {
-        // A label every 15, 30 or 60 seconds, whichever keeps them about 90 pt apart.
-        let step = [15.0, 30, 60, 120].first { width * CGFloat($0 / length) >= 90 } ?? 120
-        let marks = Array(stride(from: 0.0, through: length, by: step))
+    /// The window shown: the zoom you set, paging along with the playhead while playing.
+    private func displayWindow(length: Double, playhead: Double) -> TimelineWindow {
+        var w = model.timelineWindow
+        if abs(w.length - length) > 0.0005 { w = TimelineWindow(length: length, zoom: w.zoom, start: w.start) }
+        if transport.isPlaying && w.isZoomed {
+            let before = w.start
+            w.follow(playhead)
+            if w.start != before {
+                let start = w.start
+                DispatchQueue.main.async { model.showInTimeline(start: start) }
+            }
+        }
+        return w
+    }
+
+    private func reportTrackFrame(_ geo: GeometryProxy, trackWidth: CGFloat) {
+        let f = geo.frame(in: .global)
+        model.timelineTrackFrame = CGRect(x: f.minX + labelWidth + 12, y: f.minY, width: trackWidth, height: f.height)
+    }
+
+    /// Timecode labels at a spacing that suits the zoom, with zoom buttons in the label column
+    /// and, when zoomed, an overview bar you can drag.
+    private func ruler(width: CGFloat, win: TimelineWindow) -> some View {
+        let fps = song.rate.framesPerSecond
+        let step = win.tickStep(width: Double(width), fps: fps)
+        let first = (win.start / step).rounded(.up) * step
+        let marks = Array(stride(from: first, through: win.end + 1e-9, by: step).prefix(200))
+        let showFrames = step < 1 || win.zoom >= 8
         return HStack(spacing: 12) {
-            Color.clear.frame(width: labelWidth, height: 1)
+            zoomControls.frame(width: labelWidth, alignment: .leading)
             ZStack(alignment: .topLeading) {
                 ForEach(marks, id: \.self) { t in
-                    Text(String(song.start.adding(frames: Int(t * song.rate.framesPerSecond)).description.prefix(8)))
+                    let tc = song.start.adding(frames: Int((t * fps + 1e-6).rounded(.down)))
+                    Text(showFrames ? tc.description : String(tc.description.prefix(8)))
                         .font(.manrope(11).monospacedDigit())
                         .foregroundStyle(Brand.graphite)
                         .fixedSize()
-                        .position(x: width * CGFloat(t / length), y: 10)
+                        .position(x: CGFloat(win.x(t, width: Double(width))), y: 8)
                 }
+                if win.isZoomed { overview(width: width, win: win) }
             }
             .frame(width: width, height: 22)
+            .clipped()
         }
     }
 
-    private var timecodeLane: some View {
-        HStack {
-            Text(song.hasTimecode ? song.start.description : "No timecode for this song")
+    private var zoomControls: some View {
+        let zoomed = model.timelineWindow.isZoomed
+        return HStack(spacing: 2) {
+            zoomButton("minus.magnifyingglass", "Zoom out (⌘−)") { model.zoomTimeline(by: 0.5) }.disabled(!zoomed)
+            zoomButton("plus.magnifyingglass", "Zoom in (⌘=). Or pinch, or ⌘-scroll, over the timeline.") { model.zoomTimeline(by: 2) }
+            if zoomed {
+                Button { model.zoomToFit() } label: {
+                    Text("Fit").font(.manrope(10.5, .bold)).foregroundStyle(Brand.gold)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(Brand.gold.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .help("Show the whole song (⌘0)")
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private func zoomButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Brand.space)
+                .frame(width: 22, height: 20).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// Where the window sits in the song; drag it to move along.
+    private func overview(width: CGFloat, win: TimelineWindow) -> some View {
+        let x0 = width * CGFloat(win.start / win.length)
+        let w = max(18, width * CGFloat(win.span / win.length))
+        return ZStack(alignment: .leading) {
+            Capsule().fill(.white.opacity(0.06)).frame(width: width, height: 3)
+            Capsule().fill(Brand.space.opacity(0.7)).frame(width: w, height: 3).offset(x: min(x0, width - w))
+        }
+        .frame(width: width, height: 8)
+        .contentShape(Rectangle())
+        .offset(y: 15)
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+            let t = Double(v.location.x / max(width, 1)) * win.length - win.span / 2
+            model.showInTimeline(start: t)
+        })
+        .help("Drag to move along the song")
+    }
+
+    private func timecodeLane(_ win: TimelineWindow) -> some View {
+        let fps = song.rate.framesPerSecond
+        let from = win.isZoomed ? song.start.adding(frames: Int(win.start * fps)) : song.start
+        let to = win.isZoomed ? song.start.adding(frames: Int(win.end * fps)) : song.end
+        return HStack {
+            Text(song.hasTimecode ? from.description : "No timecode for this song")
             Spacer()
-            Text(song.hasTimecode ? (song.end?.description ?? "") : "")
+            Text(song.hasTimecode ? (to?.description ?? "") : "")
         }
         .font(.manrope(10.5, .semibold).monospacedDigit())
         .foregroundStyle(Brand.ink)
@@ -325,46 +405,74 @@ struct TimelinePanel: View {
         )
     }
 
-    private func xPos(of marker: Marker, width: CGFloat, length: Double) -> CGFloat {
-        width * CGFloat(Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond / length)
+    private func xPos(of marker: Marker, width: CGFloat, win: TimelineWindow) -> CGFloat {
+        CGFloat(win.x(Double(marker.time.frames(since: song.start)) / song.rate.framesPerSecond, width: Double(width)))
     }
 
-    private func markerLane(_ markers: [Marker], width: CGFloat, length: Double) -> some View {
+    private func markerLane(_ markers: [Marker], width: CGFloat, win: TimelineWindow) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 8).fill(Brand.gold.opacity(0.05))
             ForEach(markers) { marker in
-                let x = xPos(of: marker, width: width, length: length)
-                let flip = x > width * 0.85
-                HStack(spacing: 7) {
-                    if flip { markerChip(marker) }
-                    Capsule().fill(Brand.gold).frame(width: 2, height: 36)
-                    if !flip { markerChip(marker) }
+                let dx = dragging?.id == marker.id ? dragging?.dx ?? 0 : 0
+                let x = xPos(of: marker, width: width, win: win) + dx
+                if x > -200 && x < width + 200 {
+                    let flip = x > width * 0.85
+                    HStack(spacing: 7) {
+                        if flip { markerChip(marker, width: width, win: win) }
+                        Capsule().fill(Brand.gold).frame(width: 2, height: 36)
+                        if !flip { markerChip(marker, width: width, win: win) }
+                    }
+                    .fixedSize()
+                    .alignmentGuide(.leading) { d in flip ? d.width : 0 }
+                    .offset(x: x - (flip ? 0 : 1), y: 4)
+                    .transition(.opacity.combined(with: .offset(y: 6)))
                 }
-                .fixedSize()
-                .alignmentGuide(.leading) { d in flip ? d.width : 0 }
-                .offset(x: x - (flip ? 0 : 1), y: 4)
-                .transition(.opacity.combined(with: .offset(y: 6)))
             }
         }
         .frame(width: width, height: 44)
+        .clipped()
     }
 
-    private func markerLabel(_ text: String) -> some View {
+    private func markerLabel(_ text: String, selected: Bool) -> some View {
         Text(text).font(.manrope(11.5, .semibold)).foregroundStyle(Brand.ink)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 6).fill(Brand.phantom))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Brand.gold, lineWidth: selected ? 1.5 : 0))
     }
 
-    private func markerChip(_ marker: Marker) -> some View {
-        markerLabel(marker.label)
+    private func markerChip(_ marker: Marker, width: CGFloat, win: TimelineWindow) -> some View {
+        markerLabel(marker.label, selected: model.selectedMarkerID == marker.id)
             .contentShape(Rectangle())
-            .onTapGesture { transport.locate(model.seconds(of: marker, in: song)) }
+            .onTapGesture {
+                model.selectedMarkerID = marker.id
+                transport.locate(model.seconds(of: marker, in: song))
+            }
+            .gesture(moveGesture(marker, width: width, win: win))
             .contextMenu {
                 Button("Go to Marker") { transport.locate(model.seconds(of: marker, in: song)) }
                 Button("Rename…") { model.markerEdit = MarkerEdit(marker: marker, song: song) }.disabled(model.locked)
+                Button("Move to Playhead") { model.moveToPlayhead(marker, in: song) }.disabled(model.locked)
+                Button("One Frame Earlier") { model.nudge(marker, in: song, frames: -1) }.disabled(model.locked)
+                Button("One Frame Later") { model.nudge(marker, in: song, frames: 1) }.disabled(model.locked)
+                Divider()
                 Button("Delete") { model.deleteMarker(marker, in: song) }.disabled(model.locked)
             }
-            .help("Click to go here. Right-click to rename or delete.")
+            .help("Click to select and go here. Drag to move; ⌥← ⌥→ nudge a frame; Delete removes it.")
+    }
+
+    /// Drag a marker or trigger along its lane; it lands on a whole frame.
+    private func moveGesture(_ m: Marker, width: CGFloat, win: TimelineWindow) -> some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { v in
+                guard !model.locked else { return }
+                model.selectedMarkerID = m.id
+                dragging = (m.id, v.translation.width)
+            }
+            .onEnded { v in
+                dragging = nil
+                guard !model.locked, width > 0 else { return }
+                model.move(m, in: song, to: model.seconds(of: m, in: song) + Double(v.translation.width / width) * win.span)
+            }
     }
 
     // MARK: Executor lanes
@@ -381,7 +489,7 @@ struct TimelinePanel: View {
         return (targets.map(\.name).joined(separator: ", "), true)
     }
 
-    private func triggerLane(_ lane: TriggerLane, height: CGFloat, width: CGFloat, length: Double) -> some View {
+    private func triggerLane(_ lane: TriggerLane, height: CGFloat, width: CGFloat, win: TimelineWindow) -> some View {
         let color = Brand.lane(lane.color)
         let selected = isSelected(lane)
         let triggers = song.markers.filter { $0.laneID == lane.id }
@@ -396,20 +504,23 @@ struct TimelinePanel: View {
                 ForEach(Array(triggers.enumerated()), id: \.element.id) { i, m in
                     // Room for the label: up to the next trigger (or back to the previous one
                     // when the label sits on the left near the end).
-                    let x = xPos(of: m, width: width, length: length)
-                    let next = i + 1 < triggers.count ? xPos(of: triggers[i + 1], width: width, length: length) : width
-                    let prev = i > 0 ? xPos(of: triggers[i - 1], width: width, length: length) : 0
-                    triggerTick(m, lane: lane, color: color, height: height, width: width, length: length,
+                    let x = xPos(of: m, width: width, win: win)
+                    if x > -200 && x < width + 200 {
+                    let next = i + 1 < triggers.count ? xPos(of: triggers[i + 1], width: width, win: win) : width
+                    let prev = i > 0 ? xPos(of: triggers[i - 1], width: width, win: win) : 0
+                    triggerTick(m, lane: lane, color: color, height: height, width: width, win: win,
                                 room: x > width * 0.88 ? x - prev - 10 : next - x - 10)
+                    }
                 }
             }
             .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .opacity(lane.muted ? 0.4 : 1)
             .contentShape(Rectangle())
             .gesture(SpatialTapGesture(count: 2).onEnded { value in
-                model.addTrigger(on: lane, at: Double(value.location.x / max(width, 1)) * length)
+                model.addTrigger(on: lane, at: win.time(atX: Double(value.location.x), width: Double(width)))
             })
-            .simultaneousGesture(TapGesture().onEnded { model.selectedLaneID = lane.id })
+            .simultaneousGesture(TapGesture().onEnded { model.selectedLaneID = lane.id; model.selectedMarkerID = nil })
             .help("Double-click to drop a trigger here. Press C to drop one at the playhead.")
         }
         .accessibilityElement(children: .contain)
@@ -436,6 +547,9 @@ struct TimelinePanel: View {
                     }
                 }
                 Spacer(minLength: 0)
+                if let key = lane.key {
+                    KeyCap(key: key.uppercased()).help("Press \(key.uppercased()) to drop a trigger on this lane at the playhead")
+                }
                 if lane.muted {
                     Image(systemName: "speaker.slash.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(Brand.graphite)
                 } else if !reachable {
@@ -465,11 +579,12 @@ struct TimelinePanel: View {
         return m.label == "Level" ? "\(Int(v))%" : "\(m.label) · \(Int(v))%"
     }
 
-    private func triggerTick(_ m: Marker, lane: TriggerLane, color: Color, height: CGFloat, width: CGFloat, length: Double,
+    private func triggerTick(_ m: Marker, lane: TriggerLane, color: Color, height: CGFloat, width: CGFloat, win: TimelineWindow,
                              room: CGFloat) -> some View {
         let fired = control.firedAt[m.id].map { Date().timeIntervalSince($0) < 0.35 } ?? false
         let dx = dragging?.id == m.id ? dragging?.dx ?? 0 : 0
-        let x = min(width, max(0, xPos(of: m, width: width, length: length) + dx))
+        let x = xPos(of: m, width: width, win: win) + dx
+        let selected = model.selectedMarkerID == m.id
         let flip = x > width * 0.88
         let text = triggerText(m, lane: lane)
         // Labels that would run into the next trigger are left off (hover shows them).
@@ -480,9 +595,10 @@ struct TimelinePanel: View {
             .lineLimit(1)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(fired ? Brand.gold : Brand.phantom))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Brand.gold, lineWidth: selected && !fired ? 1.5 : 0))
         return HStack(spacing: 5) {
             if flip && showLabel { chip }
-            Capsule().fill(fired ? Brand.gold : color).frame(width: fired ? 3 : 2, height: max(8, height - 8))
+            Capsule().fill(fired || selected ? Brand.gold : color).frame(width: fired || selected ? 3 : 2, height: max(8, height - 8))
             if !flip && showLabel { chip }
         }
         .fixedSize()
@@ -493,15 +609,10 @@ struct TimelinePanel: View {
         .contentShape(Rectangle())
         .onTapGesture {
             model.selectedLaneID = lane.id
+            model.selectedMarkerID = m.id
             transport.locate(model.seconds(of: m, in: song))
         }
-        .gesture(DragGesture(minimumDistance: 3)
-            .onChanged { v in if !model.locked { dragging = (m.id, v.translation.width) } }
-            .onEnded { v in
-                dragging = nil
-                guard !model.locked, width > 0 else { return }
-                model.move(m, in: song, to: model.seconds(of: m, in: song) + Double(v.translation.width / width) * length)
-            })
+        .gesture(moveGesture(m, width: width, win: win))
         .contextMenu {
             Button("Go to Trigger") { transport.locate(model.seconds(of: m, in: song)) }
             Button("Fire Now") { model.fire(m) }
@@ -523,7 +634,7 @@ struct TimelinePanel: View {
             Divider()
             Button("Delete") { model.deleteMarker(m, in: song) }.disabled(model.locked)
         }
-        .help("\(text) · \(m.time.description) · \(lane.commandLine(for: m) ?? "Fader \(lane.page).\(lane.executor)"). Drag to move, right-click for more.")
+        .help("\(text) · \(m.time.description) · \(lane.commandLine(for: m) ?? "Fader \(lane.page).\(lane.executor)"). Drag to move, ⌥← ⌥→ nudge a frame, Delete removes it.")
         .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .bottom)))
     }
 
@@ -542,36 +653,51 @@ struct TimelinePanel: View {
             .buttonStyle(.plain)
             .disabled(model.locked)
             .frame(width: labelWidth, alignment: .leading)
-            if let lane = model.selectedLane {
-                HStack(spacing: 6) {
+            HStack(spacing: 6) {
+                if lanes.contains(where: { $0.key != nil }) {
+                    Image(systemName: "keyboard").foregroundStyle(Brand.space)
+                    Text("Play the song and press each lane's key to drop triggers as you go.")
+                    KeyCap(key: "⌫").padding(.leading, 4)
+                    Text("takes back the selected one.")
+                } else if let lane = model.selectedLane {
                     KeyCap(key: "C")
                     Text("drops a trigger on")
                     Text(lane.title).foregroundStyle(Brand.lane(lane.color))
-                    Text("at the playhead. Double-click a lane to place one; drag to move.")
+                    Text("at the playhead. Give a lane a key to drop triggers on it live.")
                 }
-                .font(.manrope(11.5))
-                .foregroundStyle(Brand.graphite)
-                .lineLimit(1)
             }
-            Spacer(minLength: 0)
+            .font(.manrope(11.5))
+            .foregroundStyle(Brand.graphite)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            Spacer(minLength: 8)
+            Toggle(isOn: $control.settings.keysFire) {
+                Text("Keys fire the console").font(.manrope(11.5, .medium)).foregroundStyle(Brand.steel)
+            }
+            .toggleStyle(.checkbox)
+            .fixedSize()
+            .help("When on, a lane's key also fires its executor as it drops the trigger, so you see the look while you program.")
         }
         .frame(height: 26)
     }
 
-    private func markerLines(width: CGFloat, length: Double, height: CGFloat) -> some View {
+    private func markerLines(width: CGFloat, win: TimelineWindow, height: CGFloat) -> some View {
         let selected = model.selectedLane
         return ZStack(alignment: .topLeading) {
+            Color.clear.frame(width: width, height: 1)
             ForEach(song.markers) { marker in
                 if marker.laneID == nil {
                     Rectangle().fill(Brand.gold.opacity(0.28)).frame(width: 1, height: max(0, height))
-                        .offset(x: xPos(of: marker, width: width, length: length), y: 30)
+                        .offset(x: xPos(of: marker, width: width, win: win), y: 30)
                 } else if let lane = selected, marker.laneID == lane.id {
                     // The chosen lane's triggers, faintly through the waveform, to line them up with the music.
                     Rectangle().fill(Brand.lane(lane.color).opacity(0.22)).frame(width: 1, height: max(0, height))
-                        .offset(x: xPos(of: marker, width: width, length: length), y: 30)
+                        .offset(x: xPos(of: marker, width: width, win: win), y: 30)
                 }
             }
         }
+        .frame(width: width, height: height + 30, alignment: .topLeading)
+        .clipped()
         .allowsHitTesting(false)
     }
 
@@ -591,27 +717,32 @@ struct TimelinePanel: View {
     }
 }
 
-/// Peak bars: played part off-white, the rest graphite.
+/// Peak bars for the stretch of the song on screen: played part off-white, the rest graphite.
 struct WaveformView: View {
-    let peaks: [Float]
-    let progress: CGFloat
+    let data: WaveformData?
+    /// Song time 0 is this far into the file.
+    let fileOffset: Double
+    let from: Double
+    let to: Double
+    let playhead: Double
 
     var body: some View {
         Canvas { ctx, size in
-            guard !peaks.isEmpty else {
+            guard let data, !data.peaks.isEmpty, to > from else {
                 ctx.fill(Path(CGRect(x: 0, y: size.height / 2 - 0.5, width: size.width, height: 1)), with: .color(Brand.arsenic))
                 return
             }
             let barWidth: CGFloat = 2
             let gap: CGFloat = 1
             let count = Int(size.width / (barWidth + gap))
-            let playedX = size.width * progress
+            let perBar = (to - from) / Double(max(count, 1))
             for i in 0..<count {
                 let x = CGFloat(i) * (barWidth + gap)
-                let peak = CGFloat(peaks[min(peaks.count - 1, i * peaks.count / max(count, 1))])
+                let t = from + Double(i) * perBar
+                let peak = CGFloat(data.peak(from: t + fileOffset, to: t + perBar + fileOffset))
                 let h = max(1, peak * size.height * 0.92)
                 let rect = CGRect(x: x, y: (size.height - h) / 2, width: barWidth, height: h)
-                ctx.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(x < playedX ? Color(hex: 0xE9E9EE) : Color(hex: 0x3A3C46)))
+                ctx.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(t < playhead ? Color(hex: 0xE9E9EE) : Color(hex: 0x3A3C46)))
             }
         }
     }
