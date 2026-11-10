@@ -1029,7 +1029,6 @@ final class AppModel: ObservableObject {
     }
 
     func tryExampleShow() {
-        let zoomIn = demoZoom
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
         importState = .running(.scanning)
         Task {
@@ -1212,6 +1211,7 @@ final class AppModel: ObservableObject {
             control.settings.artNetOut = true
             control.settings.oscIn = true
         }
+        let zoomIn = demoZoom
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
         let reader = self.reader
         Task {
