@@ -505,6 +505,7 @@ struct LaneEditor: View {
         .frame(width: 600)
         .background(Brand.phantom)
         .preferredColorScheme(.dark)
+        .tint(Brand.gold)
     }
 
     /// The lane as it will be saved: numbers in range, an empty command dropped.
@@ -744,6 +745,7 @@ struct LabelsSheet: View {
         .frame(width: 620)
         .background(Brand.phantom)
         .preferredColorScheme(.dark)
+        .tint(Brand.gold)
         .onAppear { labels = ExecutorLabel.plan(lanes: model.albumLanes) }
     }
 

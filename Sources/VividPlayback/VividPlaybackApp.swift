@@ -261,6 +261,7 @@ struct RootView: View {
         }
         .background(Brand.window)
         .ignoresSafeArea()
+        .tint(Brand.gold)
         .animation(.vivid(0.4), value: transport.status)
         .sheet(isPresented: $model.issuesShown) { IssuesSheet().environmentObject(model) }
         .sheet(isPresented: $model.outputShown) {
