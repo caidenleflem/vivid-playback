@@ -659,7 +659,7 @@ struct TimelinePanel: View {
             HStack(spacing: 6) {
                 if lanes.contains(where: { $0.key != nil }) {
                     Image(systemName: "keyboard").foregroundStyle(Brand.space)
-                    Text("Play the song and press each lane's key to drop triggers as you go.")
+                    Text("Press a lane's key while it plays to drop a trigger.")
                     KeyCap(key: "⌫").padding(.leading, 4)
                     Text("takes back the selected one.")
                 } else if let lane = model.selectedLane {
