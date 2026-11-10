@@ -94,6 +94,12 @@ struct PlaybackCommands: Commands {
                 .disabled(typing || model.locked || model.screen != .timeline)
             Button("New Trigger Lane…") { model.newLane() }
                 .disabled(model.locked || model.show == nil)
+            Menu("Copy Trigger Lanes From") {
+                ForEach(model.songsWithLanes) { song in
+                    Button(song.title) { model.copyLanes(from: song) }
+                }
+            }
+            .disabled(model.locked || model.songsWithLanes.isEmpty)
             Divider()
             Toggle("Stop After Each Song", isOn: $model.stopAfterEach)
             Toggle("Show Mode (Lock Editing)", isOn: $model.locked)

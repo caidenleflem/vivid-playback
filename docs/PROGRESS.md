@@ -300,3 +300,13 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 - ⌘Z / ⇧⌘Z: snapshot undo of a song's markers for every marker edit (add, key-in, rename,
   move, nudge, level, delete), up to 100 steps; handled in the timeline only, so text fields and
   other screens keep the system Undo.
+
+## 2026-11-10: lanes per song
+
+- Lanes moved from the show to each song (`Song.triggerLanes`). Shows saved with show-wide lanes
+  are moved on load (`Show.moveLanesToSongs`, tested): each song gets the lanes it has triggers on,
+  with the same ids, and songs with no triggers get none. Nothing is lost.
+- Copy lanes from another song (Add lane menu, the empty-timeline hint, Playback menu): copies the
+  lanes as new lanes, skipping any executor/action the song already has; keys already used on the
+  song are left off the copy.
+- Consoles page counts lanes across the whole show. 94 tests pass.

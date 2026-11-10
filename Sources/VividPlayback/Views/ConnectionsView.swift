@@ -386,7 +386,7 @@ struct ConnectionsView: View {
     private func consoleCard(_ id: UUID) -> some View {
         let c = console(id)
         let on = c.wrappedValue.enabled && !c.wrappedValue.host.isEmpty
-        let lanesUsing = model.lanes.filter { $0.consoleIDs.isEmpty || $0.consoleIDs.contains(id) }.count
+        let lanesUsing = model.allLanes.filter { $0.consoleIDs.isEmpty || $0.consoleIDs.contains(id) }.count
         return ConnectionCard(active: on) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
@@ -397,7 +397,7 @@ struct ConnectionsView: View {
                             .textFieldStyle(.plain)
                             .font(.manrope(17, .semibold))
                             .foregroundStyle(Brand.ink)
-                        Text(c.wrappedValue.host.isEmpty ? "Needs an address" : (lanesUsing == 0 ? "No lanes send here" : "\(lanesUsing) lane\(lanesUsing == 1 ? "" : "s") send here"))
+                        Text(c.wrappedValue.host.isEmpty ? "Needs an address" : (lanesUsing == 0 ? "No lanes send here" : "\(lanesUsing) lane\(lanesUsing == 1 ? "" : "s") in this show send here"))
                             .font(.manrope(12.5)).foregroundStyle(c.wrappedValue.host.isEmpty ? Brand.warn : Brand.space)
                     }
                     Spacer()

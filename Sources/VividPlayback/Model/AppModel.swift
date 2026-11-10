@@ -584,7 +584,12 @@ final class AppModel: ObservableObject {
 
     // MARK: Executor lanes and triggers
 
-    var lanes: [TriggerLane] { show?.triggerLanes ?? [] }
+    /// The current song's executor lanes (each song has its own).
+    var lanes: [TriggerLane] { currentSong?.triggerLanes ?? [] }
+    /// Every lane in the show, for the Consoles page.
+    var allLanes: [TriggerLane] { show?.songs.flatMap { $0.triggerLanes ?? [] } ?? [] }
+    /// Other songs with lanes, to copy from.
+    var songsWithLanes: [Song] { show?.songs.filter { $0.id != currentSongID && !($0.triggerLanes ?? []).isEmpty } ?? [] }
     var selectedLane: TriggerLane? { lanes.first { $0.id == selectedLaneID } ?? lanes.first }
 
     /// Hands the current song's triggers to the firing queue.
@@ -600,24 +605,53 @@ final class AppModel: ObservableObject {
     }
 
     func saveLane(_ lane: TriggerLane) {
+        guard let song = currentSong else { return }
         edit { show in
-            var list = show.triggerLanes ?? []
+            guard let s = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+            var list = show.songs[s].triggerLanes ?? []
             // A key belongs to one lane: giving it to this one takes it off any other.
             if let key = lane.key {
                 for j in list.indices where list[j].id != lane.id && list[j].key == key { list[j].key = nil }
             }
             if let i = list.firstIndex(where: { $0.id == lane.id }) { list[i] = lane } else { list.append(lane) }
-            show.triggerLanes = list
+            show.songs[s].triggerLanes = list
         }
         selectedLaneID = lane.id
     }
 
     func deleteLane(_ lane: TriggerLane) {
+        guard let song = currentSong else { return }
         edit { show in
-            show.triggerLanes?.removeAll { $0.id == lane.id }
-            for i in show.songs.indices { show.songs[i].markers.removeAll { $0.laneID == lane.id } }
+            guard let s = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+            show.songs[s].triggerLanes?.removeAll { $0.id == lane.id }
+            if show.songs[s].triggerLanes?.isEmpty == true { show.songs[s].triggerLanes = nil }
+            show.songs[s].markers.removeAll { $0.laneID == lane.id }
         }
         if selectedLaneID == lane.id { selectedLaneID = lanes.first?.id }
+    }
+
+    /// Copies another song's lanes (not its triggers) onto this song, as new lanes. A lane whose
+    /// executor and action this song already has is skipped; keys already in use are left off.
+    func copyLanes(from source: Song) {
+        guard let song = currentSong, !locked else { return }
+        var list = lanes
+        var added = 0
+        for lane in source.triggerLanes ?? [] {
+            if list.contains(where: { $0.page == lane.page && $0.executor == lane.executor && $0.action == lane.action }) { continue }
+            var copy = lane.copy()
+            if let key = copy.key, list.contains(where: { $0.key == key }) { copy.key = nil }
+            list.append(copy)
+            added += 1
+        }
+        guard added > 0 else { post("\(song.title) already has \(source.title)'s lanes."); return }
+        withAnimation(.vivid(0.4)) {
+            edit { show in
+                guard let s = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+                show.songs[s].triggerLanes = list
+            }
+        }
+        selectedLaneID = list.first?.id
+        post("Copied \(added) lane\(added == 1 ? "" : "s") from \(source.title).")
     }
 
     func toggleMute(_ lane: TriggerLane) {
@@ -1360,7 +1394,7 @@ final class AppModel: ObservableObject {
                 let main = TriggerLane(name: "Main cues", page: 1, executor: 201, color: 0, key: "1")
                 let strobes = TriggerLane(name: "Strobes", page: 1, executor: 202, action: .fader, color: 2, key: "2")
                 let video = TriggerLane(name: "Video", page: 2, executor: 101, color: 4, key: "3")
-                show.triggerLanes = [main, strobes, video]
+                show.songs[2].triggerLanes = [main, strobes, video]
                 func at(_ t: Double, _ lane: TriggerLane, _ label: String, _ value: Double? = nil) -> Marker {
                     Marker(time: song.start.adding(frames: Int(t * fps)), label: label, laneID: lane.id, value: value)
                 }

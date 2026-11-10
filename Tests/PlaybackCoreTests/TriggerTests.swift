@@ -54,16 +54,49 @@ final class TriggerTests: XCTestCase {
         XCTAssertEqual(s.advance(to: 104, running: true, triggers: triggers), [])
     }
 
-    func testLanesAndTriggersSaveWithTheShow() throws {
+    func testLanesAndTriggersSaveWithTheSong() throws {
         let lane = TriggerLane(page: 2, executor: 105, action: .fader)
         var show = Show(name: "x")
-        show.triggerLanes = [lane]
-        show.songs = [Song(title: "July", start: Timecode("00:10:00:00", rate: .fps30)!,
-                           markers: [Marker(time: Timecode("00:10:05:00", rate: .fps30)!, label: "Up", laneID: lane.id, value: 80)])]
+        var song = Song(title: "July", start: Timecode("00:10:00:00", rate: .fps30)!,
+                        markers: [Marker(time: Timecode("00:10:05:00", rate: .fps30)!, label: "Up", laneID: lane.id, value: 80)])
+        song.triggerLanes = [lane]
+        show.songs = [song]
         let back = try JSONDecoder().decode(Show.self, from: JSONEncoder().encode(show))
-        XCTAssertEqual(back.triggerLanes, [lane])
+        XCTAssertEqual(back.songs[0].triggerLanes, [lane])
         XCTAssertEqual(back.songs[0].markers[0].laneID, lane.id)
         XCTAssertEqual(back.songs[0].markers[0].value, 80)
+    }
+}
+
+final class LanesPerSongTests: XCTestCase {
+    func testShowWideLanesMoveToTheSongsThatUseThem() {
+        let tc = Timecode("01:00:00:00", rate: .fps30)!
+        let a = TriggerLane(name: "A", executor: 201), b = TriggerLane(name: "B", executor: 202)
+        var show = Show(name: "x")
+        show.triggerLanes = [a, b]
+        show.songs = [
+            Song(title: "One", start: tc, markers: [Marker(time: tc, label: "go", laneID: a.id)]),
+            Song(title: "Two", start: tc, markers: [Marker(time: tc, label: "go", laneID: a.id),
+                                                    Marker(time: tc, label: "go", laneID: b.id)]),
+            Song(title: "Three", start: tc, markers: [Marker(time: tc, label: "plain")]),
+        ]
+        XCTAssertTrue(show.moveLanesToSongs())
+        XCTAssertNil(show.triggerLanes)
+        XCTAssertEqual(show.songs[0].triggerLanes, [a])
+        XCTAssertEqual(show.songs[1].triggerLanes, [a, b])
+        XCTAssertNil(show.songs[2].triggerLanes)
+        XCTAssertFalse(show.moveLanesToSongs())
+        // Songs saved before lanes existed still load.
+        let back = try? JSONDecoder().decode(Show.self, from: JSONEncoder().encode(show))
+        XCTAssertEqual(back?.songs[1].triggerLanes?.count, 2)
+    }
+
+    func testCopyGivesANewLane() {
+        let a = TriggerLane(name: "A", executor: 201, key: "1")
+        let c = a.copy()
+        XCTAssertNotEqual(c.id, a.id)
+        XCTAssertEqual(c.name, "A")
+        XCTAssertEqual(c.key, "1")
     }
 }
 

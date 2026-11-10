@@ -87,6 +87,13 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
         return t
     }
 
+    /// The same lane with a new identity (for copying lanes to another song).
+    public func copy() -> TriggerLane {
+        var l = self
+        l.id = UUID()
+        return l
+    }
+
     /// The first key no lane uses yet.
     public static func freeKey(in lanes: [TriggerLane]) -> String? {
         let used = Set(lanes.compactMap(\.key))

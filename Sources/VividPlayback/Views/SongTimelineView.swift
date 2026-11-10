@@ -267,6 +267,15 @@ struct TimelinePanel: View {
                     Text("drops a marker at the playhead.")
                     KeyCap(key: "C").padding(.leading, 10)
                     Text("starts a trigger lane that fires an MA3 executor. Songs without either stay plain playback.")
+                    if !model.songsWithLanes.isEmpty && !model.locked {
+                        Menu { copyLanesItems } label: {
+                            Text("Copy lanes from another song…").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.gold)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .padding(.leading, 10)
+                    }
                 }
                 .font(.manrope(12.5))
                 .foregroundStyle(Brand.graphite)
@@ -808,19 +817,43 @@ struct TimelinePanel: View {
         .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .bottom)))
     }
 
+    private var addLaneLabel: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "plus").font(.system(size: 10, weight: .bold))
+            Text("Add lane").font(.manrope(11.5, .semibold))
+        }
+        .foregroundStyle(Brand.space)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Capsule().fill(.white.opacity(0.05)))
+        .contentShape(Capsule())
+    }
+
+    /// "Copy lanes from": every other song that has lanes.
+    @ViewBuilder private var copyLanesItems: some View {
+        Section("Copy lanes from") {
+            ForEach(model.songsWithLanes) { other in
+                let n = other.triggerLanes?.count ?? 0
+                Button("\(other.title) · \(n) lane\(n == 1 ? "" : "s")") { model.copyLanes(from: other) }
+            }
+        }
+    }
+
     private var addLaneRow: some View {
         HStack(spacing: 12) {
-            Button { model.newLane() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus").font(.system(size: 10, weight: .bold))
-                    Text("Add lane").font(.manrope(11.5, .semibold))
+            Group {
+                if model.songsWithLanes.isEmpty {
+                    Button { model.newLane() } label: { addLaneLabel }.buttonStyle(.plain)
+                } else {
+                    Menu {
+                        Button("New Lane…") { model.newLane() }
+                        Divider()
+                        copyLanesItems
+                    } label: { addLaneLabel }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
                 }
-                .foregroundStyle(Brand.space)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Capsule().fill(.white.opacity(0.05)))
-                .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
             .disabled(model.locked)
             .frame(width: labelWidth, alignment: .leading)
             HStack(spacing: 6) {

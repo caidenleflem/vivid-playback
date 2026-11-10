@@ -40,6 +40,8 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     public var part: String?
     public var notes: String?
     public var markers: [Marker]
+    /// This song's executor lanes: each fires one MA3 executor from the triggers on it.
+    public var triggerLanes: [TriggerLane]? = nil
 
     public init(id: UUID = UUID(), number: Int? = nil, title: String, start: Timecode, fileOffset: Double = 0,
                 length: Double? = nil, masterPath: String? = nil, timecodePath: String? = nil,
@@ -122,8 +124,29 @@ public struct Show: Codable, Hashable, Sendable {
     public var sheetFile: String?
     /// Keys of warnings Caiden hid (`ShowIssue.key`).
     public var dismissedIssues: [String]?
-    /// Executor lanes: each fires one MA3 executor from triggers on the song timelines.
+    /// Executor lanes from shows saved before lanes belonged to songs. Read once and moved onto
+    /// the songs by `moveLanesToSongs()`; new shows leave it empty.
     public var triggerLanes: [TriggerLane]?
+
+    /// Older shows kept one set of lanes for the whole show. Each song now has its own: a song
+    /// gets the show lanes it has triggers on (same ids, so its triggers stay on them), and
+    /// songs with none get none. Returns true when anything moved.
+    @discardableResult
+    public mutating func moveLanesToSongs() -> Bool {
+        guard let shared = triggerLanes, !shared.isEmpty else {
+            if triggerLanes != nil { triggerLanes = nil; return true }
+            return false
+        }
+        for i in songs.indices {
+            let used = Set(songs[i].markers.compactMap(\.laneID))
+            let mine = songs[i].triggerLanes ?? []
+            let have = Set(mine.map(\.id))
+            let moved = shared.filter { used.contains($0.id) && !have.contains($0.id) }
+            if !moved.isEmpty { songs[i].triggerLanes = mine + moved }
+        }
+        triggerLanes = nil
+        return true
+    }
 
     public init(name: String, defaultRate: FrameRate = .fps30, mediaFolder: String? = nil, songs: [Song] = [],
                 setlists: [Setlist] = [], routing: OutputRouting = OutputRouting(), sheetMapping: ColumnMapping? = nil,
@@ -182,7 +205,9 @@ public enum ShowStore {
 
     public static func load(from package: URL) throws -> Show {
         let data = try Data(contentsOf: package.appendingPathComponent("show.json"))
-        return try JSONDecoder().decode(Show.self, from: data)
+        var show = try JSONDecoder().decode(Show.self, from: data)
+        show.moveLanesToSongs()
+        return show
     }
 
     /// `path` relative to `folder` when it's inside it, else absolute.

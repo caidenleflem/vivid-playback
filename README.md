@@ -74,7 +74,8 @@ spacing. **⌘Z** undoes any marker or trigger change (adding, keying in, moving
 **⇧⌘Z** redoes.
 
 Triggers fire over OSC on time with the music you hear (the same clock as the timecode), and
-flash gold as they go. Lanes belong to the show; each song has its own triggers.
+flash gold as they go. Each song has its own lanes. To reuse a set, use **Add lane › Copy
+lanes from** (or **Playback › Copy Trigger Lanes From**): it copies the lanes, not the triggers.
 
 Set up the consoles under **Connections › Consoles**: name, IP address, port (8000) and prefix
 (gma3). On the grandMA3: Menu › In & Out › OSC, add a line on port 8000 with prefix gma3, and
