@@ -432,7 +432,7 @@ struct TimelinePanel: View {
                         if !flip { markerChip(marker, width: width, win: win) }
                     }
                     .fixedSize()
-                    .alignmentGuide(.leading) { d in flip ? d.width : 0 }
+                    .frame(width: 0, alignment: flip ? .trailing : .leading)
                     .offset(x: x - (flip ? 0 : 1), y: 4)
                     .transition(.opacity.combined(with: .offset(y: 6)))
                 }
@@ -772,8 +772,6 @@ struct TimelinePanel: View {
         }
         .fixedSize()
         .shadow(color: fired ? Brand.gold.opacity(0.6) : .clear, radius: 6)
-        .alignmentGuide(.leading) { d in flip ? d.width : 0 }
-        .offset(x: x - (flip ? 0 : 1), y: 4)
         .animation(.easeOut(duration: 0.25), value: fired)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -804,6 +802,9 @@ struct TimelinePanel: View {
             Button("Delete") { model.deleteMarker(m, in: song) }.disabled(model.locked)
         }
         .help("\(text) · \(m.time.description) · \(lane.commandLine(for: m) ?? "Fader \(lane.page).\(lane.executor)"). Drag to move, ⌥← ⌥→ nudge a frame, Delete removes it.")
+        // A zero-width anchor at the trigger: a label flipped to the left can't widen the lane.
+        .frame(width: 0, alignment: flip ? .trailing : .leading)
+        .offset(x: x - (flip ? 0 : 1), y: 4)
         .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .bottom)))
     }
 
@@ -839,6 +840,7 @@ struct TimelinePanel: View {
             .foregroundStyle(Brand.graphite)
             .lineLimit(1)
             .truncationMode(.tail)
+            .opacity(model.selectedMarkerIDs.isEmpty ? 1 : 0)
             Spacer(minLength: 8)
             Toggle(isOn: $control.settings.keysFire) {
                 Text("Keys fire the console").font(.manrope(11.5, .medium)).foregroundStyle(Brand.steel)
