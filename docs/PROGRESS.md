@@ -353,7 +353,7 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 ## 2026-11-10: firing pulse, import labels to console
 
 - Firing pulse: a trigger swells 14% with a gold glow and a bloom behind its line, and its lane's
-  name lights up in the lane colour, then settles (0.55–0.8 s ease-out). Driven by its own
+  name lights up in the lane colour, then settles (0.275–0.4 s ease-out, halved from 0.55–0.8 s). Driven by its own
   animation from `firedAt` / `laneFiredAt`, so it plays when stopped too (Fire Now, lane keys).
   Reduce Motion: glow only, no scale.
 - Import labels to console: `ExecutorLabel.plan` (tested) makes one label per executor from the

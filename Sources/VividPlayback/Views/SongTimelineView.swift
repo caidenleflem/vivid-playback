@@ -981,7 +981,7 @@ struct FirePulse: ViewModifier {
             instant.disablesAnimations = true
             withTransaction(instant) { settle = 0 }
             DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: style == .bump ? 0.55 : 0.8)) { settle = 1 }
+                withAnimation(.easeOut(duration: style == .bump ? 0.275 : 0.4)) { settle = 1 }
             }
         }
     }
@@ -1006,7 +1006,7 @@ struct FireBloom: View {
                 var instant = Transaction()
                 instant.disablesAnimations = true
                 withTransaction(instant) { settle = 0 }
-                DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.6)) { settle = 1 } }
+                DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.3)) { settle = 1 } }
             }
     }
 }
