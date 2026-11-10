@@ -50,7 +50,15 @@ jobs:
             if [ "$screen" = "first-run" ]; then "$BIN" > "build/screens/$screen.log" 2>&1 &
             else "$BIN" --demo "$screen" > "build/screens/$screen.log" 2>&1 & fi
             PID=$!
-            sleep 14
+            sleep 7
+            # How hard the app and the window server work on this screen while it plays.
+            WSPID=$(pgrep -x WindowServer | head -1)
+            top -l 3 -s 2 -pid "$PID" -stats cpu | tail -1 > "build/screens/$screen.cpu" &
+            T1=$!
+            if [ -n "$WSPID" ]; then top -l 3 -s 2 -pid "$WSPID" -stats cpu | tail -1 > "build/screens/$screen.ws" & fi
+            wait $T1 2>/dev/null; wait 2>/dev/null
+            echo "CPU on $screen: app $(cat build/screens/$screen.cpu 2>/dev/null)% · window server $(cat build/screens/$screen.ws 2>/dev/null)%"
+            sleep 2
             screencapture -x "build/screens/$screen.png" || true
             if ! kill -0 "$PID" 2>/dev/null; then
               echo "The app quit on the $screen screen:"; cat "build/screens/$screen.log"; exit 1
