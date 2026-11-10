@@ -156,3 +156,33 @@ final class LaneKeyAndWindowTests: XCTestCase {
         XCTAssertLessThan(close.tickStep(width: 1000), 0.5)
     }
 }
+
+final class ExecutorLabelTests: XCTestCase {
+    func testOneLabelPerExecutorWithTheMostUsedName() {
+        let foh = UUID(), backup = UUID()
+        let lanes = [
+            TriggerLane(name: "Main cues", page: 1, executor: 201, consoleIDs: [foh]),
+            TriggerLane(name: "Strobes", page: 1, executor: 202),
+            TriggerLane(name: "Main", page: 1, executor: 201, consoleIDs: [backup]),
+            TriggerLane(name: "Main cues", page: 1, executor: 201, consoleIDs: [foh]),
+            TriggerLane(name: "  ", page: 1, executor: 203),          // no name: nothing to send
+            TriggerLane(name: "Video", page: 2, executor: 101),
+        ]
+        let plan = ExecutorLabel.plan(lanes: lanes)
+        XCTAssertEqual(plan.map(\.id), ["1.201", "1.202", "2.101"])
+        XCTAssertEqual(plan[0].names, ["Main cues", "Main"])
+        XCTAssertEqual(plan[0].name, "Main cues")
+        XCTAssertTrue(plan[0].hasConflict)
+        XCTAssertEqual(plan[0].laneCount, 3)
+        XCTAssertEqual(Set(plan[0].consoleIDs), [foh, backup])
+        XCTAssertEqual(plan[1].consoleIDs, [])                       // every console
+        XCTAssertFalse(plan[1].hasConflict)
+    }
+
+    func testCommandKeepsTheCommandLineIntact() {
+        var label = ExecutorLabel(page: 1, executor: 201, names: ["x"], name: "Big \"look\" ", consoleIDs: [], laneCount: 1)
+        XCTAssertEqual(label.command(template: ExecutorLabel.defaultTemplate), "Label Exec 1.201 \"Big 'look'\"")
+        label.name = "Verse"
+        XCTAssertEqual(label.command(template: "Label Page {page}.{exec} \"{name}\""), "Label Page 1.201 \"Verse\"")
+    }
+}

@@ -78,6 +78,15 @@ Triggers fire over OSC on time with the music you hear (the same clock as the ti
 flash gold as they go. Each song has its own lanes. To reuse a set, use **Add lane › Copy
 lanes from** (or **Playback › Copy Trigger Lanes From**): it copies the lanes, not the triggers.
 
+Each trigger pulses as it fires (a gold bloom, and its lane's name lights up), whether it's
+fired by playback, a lane key or Fire Now.
+
+**Import labels to console** (Connections › Consoles, or Playback › Import Labels to Console…)
+names the sequence on each lane's executor after the lane, for every song in the open album. You
+see every executor and its name first, untick any you don't want, and pick a name where songs
+disagree. It sends `Label Exec 1.201 "Main cues"` by default; the command can be changed under
+Command. Lanes without a name are left alone.
+
 Set up the consoles under **Connections › Consoles**: name, IP address, port (8000) and prefix
 (gma3). On the grandMA3: Menu › In & Out › OSC, add a line on port 8000 with prefix gma3, and
 turn on Receive and Receive Command. **Fire early** sends every trigger up to 200 ms ahead to

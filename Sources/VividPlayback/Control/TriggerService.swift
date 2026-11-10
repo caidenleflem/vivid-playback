@@ -22,8 +22,8 @@ final class TriggerService: @unchecked Sendable {
     private var scheduler = TriggerScheduler()
     private var lastSong: UUID?
     private let socket = UDPSocket()
-    /// Called on the main queue with each fired trigger.
-    var onFire: ((UUID) -> Void)?
+    /// Called on the main queue with each fired trigger and its lane.
+    var onFire: ((UUID, UUID) -> Void)?
     /// Called on the main queue after each send: what went where, and whether it left this Mac.
     var onSend: ((String, Bool) -> Void)?
 
@@ -76,8 +76,27 @@ final class TriggerService: @unchecked Sendable {
         for id in fired {
             guard let p = armed.payload[id] else { continue }
             send(lane: p.lane, marker: p.marker, consoles: consoles)
-            let cb = onFire
-            DispatchQueue.main.async { cb?(id) }
+            let cb = onFire, laneID = p.lane.id
+            DispatchQueue.main.async { cb?(id, laneID) }
+        }
+    }
+
+    /// Sends command lines (one after another, a few milliseconds apart so a console isn't
+    /// flooded), then reports how many went out and how many couldn't leave this Mac.
+    func sendCommands(_ items: [(command: String, consoles: [ConsoleTarget])], done: @escaping (Int, Int) -> Void) {
+        queue.async {
+            var sent = 0, failed = 0
+            for item in items {
+                for console in item.consoles {
+                    if self.socket?.send(console.command(item.command).encoded(), to: console.host, port: console.port) == true {
+                        sent += 1
+                    } else {
+                        failed += 1
+                    }
+                    usleep(15_000)
+                }
+            }
+            DispatchQueue.main.async { done(sent, failed) }
         }
     }
 

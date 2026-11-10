@@ -644,3 +644,141 @@ struct KeyRecorder: View {
         monitor = nil
     }
 }
+
+/// Import Labels to Console: names each executor's sequence after the album's lanes. Shows
+/// every command first; nothing is sent until you press Send.
+struct LabelsSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var control: ControlCenter
+    @Environment(\.dismiss) private var dismiss
+    @State private var labels: [ExecutorLabel] = []
+    @State private var skipped: Set<String> = []
+    @State private var sending = false
+    @State private var result: (sent: Int, failed: Int)?
+    @State private var showCommand = false
+
+    private var consoles: [ConsoleTarget] { control.settings.consoles }
+    private var chosen: [ExecutorLabel] { labels.filter { !skipped.contains($0.id) && !$0.targets(in: consoles).isEmpty } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Import labels to console").font(.manrope(22, .semibold)).foregroundStyle(Brand.ink)
+                    Text("Names the sequence on each lane's executor after the lane, for every song in \(model.setlist?.name ?? "this album").")
+                        .font(.manrope(13)).foregroundStyle(Brand.steel).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+
+            if labels.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "tag").font(.system(size: 26, weight: .light)).foregroundStyle(Brand.graphite)
+                    Text("No named lanes in this album").font(.manrope(15, .semibold)).foregroundStyle(Brand.ink)
+                    Text("Give lanes a name in Edit Lane, then come back.").font(.manrope(13)).foregroundStyle(Brand.space)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach($labels) { $label in row($label) }
+                    }
+                }
+                .frame(maxHeight: 340)
+
+                DisclosureGroup(isExpanded: $showCommand) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField(ExecutorLabel.defaultTemplate, text: $control.settings.labelTemplate)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12.5, design: .monospaced))
+                        HStack {
+                            Text("{page}, {exec} and {name} are filled in for each executor.")
+                                .font(.manrope(11.5)).foregroundStyle(Brand.space)
+                            Spacer()
+                            if control.settings.labelTemplate != ExecutorLabel.defaultTemplate {
+                                Button("Reset") { control.settings.labelTemplate = ExecutorLabel.defaultTemplate }
+                                    .buttonStyle(QuietButtonStyle())
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Command").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel)
+                        if let first = chosen.first {
+                            Text(first.command(template: control.settings.labelTemplate))
+                                .font(.system(size: 12, design: .monospaced)).foregroundStyle(Brand.champagne).lineLimit(1)
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                if let result {
+                    StatusDot(color: result.failed == 0 ? Brand.ok : Brand.warn)
+                    Text(result.failed == 0 ? "Sent. Check the executor names on the console."
+                                            : "\(result.failed) couldn't leave this Mac. Check the network.")
+                        .font(.manrope(12.5)).foregroundStyle(Brand.steel)
+                } else if consoles.filter({ $0.enabled && !$0.host.isEmpty }).isEmpty {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Brand.warn)
+                    Text("No console to send to. Add one in Connections › Consoles.").font(.manrope(12.5)).foregroundStyle(Brand.steel)
+                }
+                Spacer()
+                Button(result == nil ? "Cancel" : "Done") { dismiss() }
+                    .buttonStyle(QuietButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button(sending ? "Sending…" : "Send \(chosen.count) label\(chosen.count == 1 ? "" : "s")") {
+                    sending = true
+                    model.sendLabels(chosen) { sent, failed in
+                        sending = false
+                        result = (sent, failed)
+                    }
+                }
+                .buttonStyle(QuietButtonStyle(prominent: true))
+                .keyboardShortcut(.defaultAction)
+                .disabled(chosen.isEmpty || sending)
+            }
+        }
+        .padding(24)
+        .frame(width: 620)
+        .background(Brand.phantom)
+        .preferredColorScheme(.dark)
+        .onAppear { labels = ExecutorLabel.plan(lanes: model.albumLanes) }
+    }
+
+    private func row(_ label: Binding<ExecutorLabel>) -> some View {
+        let l = label.wrappedValue
+        let targets = l.targets(in: consoles)
+        let on = !skipped.contains(l.id)
+        return HStack(spacing: 12) {
+            Toggle("", isOn: Binding(get: { on }, set: { if $0 { skipped.remove(l.id) } else { skipped.insert(l.id) } }))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+            Text(l.id).font(.manrope(13, .bold).monospacedDigit()).foregroundStyle(Brand.gold).frame(width: 64, alignment: .leading)
+            TextField("Name", text: label.name)
+                .textFieldStyle(.roundedBorder)
+                .font(.manrope(13.5))
+            if l.hasConflict {
+                Menu {
+                    Section("Lanes on \(l.id) are called") {
+                        ForEach(l.names, id: \.self) { n in Button(n) { label.wrappedValue.name = n } }
+                    }
+                } label: {
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(Brand.warn)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Songs name this executor differently: \(l.names.joined(separator: ", ")). Pick one.")
+            }
+            Text(targets.isEmpty ? "No console" : targets.map(\.name).joined(separator: ", "))
+                .font(.manrope(12)).foregroundStyle(targets.isEmpty ? Brand.warn : Brand.space)
+                .lineLimit(1)
+                .frame(width: 110, alignment: .trailing)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 9).fill(.white.opacity(on ? 0.05 : 0.02)))
+        .opacity(on ? 1 : 0.5)
+    }
+}

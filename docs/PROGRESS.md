@@ -349,3 +349,17 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 - Song list: one click selects, a double-click plays the song from its top (the song already
   playing carries on), a third click opens the timeline. Read from the click's own count, so the
   double-click acts at once instead of waiting out a possible third click.
+
+## 2026-11-10: firing pulse, import labels to console
+
+- Firing pulse: a trigger swells 14% with a gold glow and a bloom behind its line, and its lane's
+  name lights up in the lane colour, then settles (0.55–0.8 s ease-out). Driven by its own
+  animation from `firedAt` / `laneFiredAt`, so it plays when stopped too (Fire Now, lane keys).
+  Reduce Motion: glow only, no scale.
+- Import labels to console: `ExecutorLabel.plan` (tested) makes one label per executor from the
+  album's named lanes, most-used name first, consoles merged (empty = all). The sheet lists every
+  executor with an editable name, a picker where songs disagree, and the consoles it goes to;
+  untick to skip. Sent as `/gma3/cmd` command lines, 15 ms apart. Default command
+  `Label Exec {page}.{exec} "{name}"` (editable, saved per Mac); double quotes in names become
+  single quotes. **Needs a check on the console** that labelling the executor names its sequence.
+- 99 tests pass.

@@ -734,6 +734,7 @@ struct TimelinePanel: View {
             .padding(.trailing, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.white.opacity(selected ? 0.07 : 0)))
+            .modifier(FirePulse(fired: control.laneFiredAt[lane.id], color: color, style: .glow))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -773,11 +774,11 @@ struct TimelinePanel: View {
         return HStack(spacing: 5) {
             if flip && showLabel { chip }
             Capsule().fill(fired || selected ? Brand.gold : color).frame(width: fired || selected ? 3 : 2, height: max(8, height - 8))
+                .background(FireBloom(fired: control.firedAt[m.id], height: max(8, height - 8)))
             if !flip && showLabel { chip }
         }
         .fixedSize()
-        .shadow(color: fired ? Brand.gold.opacity(0.6) : .clear, radius: 6)
-        .animation(.easeOut(duration: 0.25), value: fired)
+        .modifier(FirePulse(fired: control.firedAt[m.id]))
         .contentShape(Rectangle())
         .onTapGesture {
             model.selectedLaneID = lane.id
@@ -945,5 +946,67 @@ struct WaveformView: View {
                 ctx.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(t < playhead ? Color(hex: 0xE9E9EE) : Color(hex: 0x3A3C46)))
             }
         }
+    }
+}
+
+// MARK: Firing pulse
+
+/// Plays once each time `fired` changes: what just fired swells a touch and glows, then settles.
+/// Animated on its own, so it shows whether or not the song is rolling. Reduce Motion: a glow only.
+struct FirePulse: ViewModifier {
+    enum Style { case bump, glow }
+    let fired: Date?
+    var color: Color = Brand.gold
+    var style: Style = .bump
+    /// 1 when settled; 0 at the moment of firing.
+    @State private var settle: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let p = 1 - settle
+        return Group {
+            switch style {
+            case .bump:
+                content
+                    .scaleEffect(reduceMotion ? 1 : 1 + 0.14 * p)
+                    .shadow(color: color.opacity(0.85 * p), radius: 10 * p)
+            case .glow:
+                content
+                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(color.opacity(0.32 * p)))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(color.opacity(0.7 * p), lineWidth: 1))
+            }
+        }
+        .onChange(of: fired) { _ in
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { settle = 0 }
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: style == .bump ? 0.55 : 0.8)) { settle = 1 }
+            }
+        }
+    }
+}
+
+/// A soft gold bloom behind a trigger's line as it fires.
+struct FireBloom: View {
+    let fired: Date?
+    let height: CGFloat
+    @State private var settle: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let p = 1 - settle
+        Capsule()
+            .fill(Brand.gold)
+            .frame(width: reduceMotion ? 3 : 3 + 18 * p, height: height)
+            .blur(radius: reduceMotion ? 0 : 5 * p)
+            .opacity(0.9 * Double(p))
+            .allowsHitTesting(false)
+            .onChange(of: fired) { _ in
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { settle = 0 }
+                DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.6)) { settle = 1 } }
+            }
     }
 }

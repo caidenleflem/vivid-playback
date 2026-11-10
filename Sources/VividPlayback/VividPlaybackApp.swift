@@ -97,6 +97,8 @@ struct PlaybackCommands: Commands {
                 .disabled(typing || model.locked || model.screen != .timeline)
             Button("New Trigger Lane…") { model.newLane() }
                 .disabled(model.locked || model.show == nil)
+            Button("Import Labels to Console…") { model.labelsShown = true }
+                .disabled(model.show == nil)
             Menu("Copy Trigger Lanes From") {
                 ForEach(model.songsWithLanes) { song in
                     Button(song.title) { model.copyLanes(from: song) }
@@ -269,6 +271,7 @@ struct RootView: View {
         .sheet(isPresented: $model.showInfoShown) { ShowInfoSheet().environmentObject(model) }
         .sheet(isPresented: $model.addAlbumShown) { AddAlbumSheet().environmentObject(model) }
         .sheet(item: $model.showInfoEntry) { entry in ShowInfoSheet(entry: entry).environmentObject(model) }
+        .sheet(isPresented: $model.labelsShown) { LabelsSheet().environmentObject(model).environmentObject(model.control) }
         .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song).environmentObject(model) }
         .sheet(item: $model.laneEdit) { lane in LaneEditor(lane: lane).environmentObject(model).environmentObject(model.control) }
     }

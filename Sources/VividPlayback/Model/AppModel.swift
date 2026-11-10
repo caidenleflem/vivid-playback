@@ -235,7 +235,7 @@ final class AppModel: ObservableObject {
     func refreshDevices() { devices = AudioDevices.all() }
 
     /// While a sheet is open, single-key shortcuts (Space, M, L, arrows) stay out of the way of typing.
-    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown || laneEdit != nil || typingInField || addAlbumShown || showInfoEntry != nil }
+    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown || laneEdit != nil || typingInField || addAlbumShown || showInfoEntry != nil || labelsShown }
 
     static var showsFolder: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Vivid Playback")
@@ -914,10 +914,36 @@ final class AppModel: ObservableObject {
     func fire(_ marker: Marker) {
         guard let lane = lanes.first(where: { $0.id == marker.laneID }) else { return }
         control.triggers.fire(lane: lane, marker: marker)
+        control.flash(marker.id, lane: lane.id)
     }
 
     func fireLane(_ lane: TriggerLane) {
         control.triggers.fire(lane: lane, marker: nil)
+        control.flash(nil, lane: lane.id)
+    }
+
+    // MARK: Import labels to console
+
+    @Published var labelsShown = false
+
+    /// Every lane in the open album (the current setlist's songs), for naming executors.
+    var albumLanes: [TriggerLane] {
+        guard let show else { return [] }
+        let ids = setlist?.songIDs ?? show.songs.map(\.id)
+        return ids.compactMap(show.song(id:)).flatMap { $0.triggerLanes ?? [] }
+    }
+
+    /// Names each executor's sequence after its lanes, on the consoles those lanes fire.
+    func sendLabels(_ labels: [ExecutorLabel], done: @escaping (Int, Int) -> Void) {
+        let consoles = control.settings.consoles
+        let template = control.settings.labelTemplate
+        let items = labels.map { (command: $0.command(template: template), consoles: $0.targets(in: consoles)) }
+            .filter { !$0.consoles.isEmpty }
+        control.triggers.sendCommands(items) { [weak self] sent, failed in
+            done(sent, failed)
+            self?.post(failed == 0 ? "Sent \(labels.count) label\(labels.count == 1 ? "" : "s") to the console."
+                                   : "\(failed) label command\(failed == 1 ? "" : "s") couldn't leave this Mac. Check the network and Local Network access.")
+        }
     }
 
     // MARK: Timeline keys, zoom and selection
@@ -976,7 +1002,7 @@ final class AppModel: ObservableObject {
         let late = transport.isPlaying ? max(0, min(0.25, CACurrentMediaTime() - event.timestamp)) : 0
         guard let marker = addTrigger(on: lane, at: transport.position() - late) else { return true }
         if control.settings.keysFire && !lane.muted { control.triggers.fire(lane: lane, marker: marker) }
-        control.flash(marker.id)
+        control.flash(marker.id, lane: lane.id)
         return true
     }
 
@@ -1598,6 +1624,7 @@ final class AppModel: ObservableObject {
     private func runDemo(_ name: String) {
         var demoZoom = false
         var demoAddAlbum = false
+        var demoLabels = false
         let target: Screen
         switch name {
         case "library": target = .library
@@ -1608,6 +1635,7 @@ final class AppModel: ObservableObject {
         case "consoles": target = .connections; connectionsAnchor = "consoles"
         case "albums": target = .albums
         case "add-album": target = .albums; demoAddAlbum = true
+        case "labels": target = .timeline; demoLabels = true
         default: return
         }
         if target == .connections {
@@ -1617,6 +1645,7 @@ final class AppModel: ObservableObject {
         }
         let zoomIn = demoZoom
         let addAlbumSheet = demoAddAlbum
+        let labelsSheet = demoLabels
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
         let reader = self.reader
         Task {
@@ -1675,6 +1704,10 @@ final class AppModel: ObservableObject {
             }
             screen = target
             if !zoomIn { transport.play() }
+            if labelsSheet {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                labelsShown = true
+            }
             if addAlbumSheet {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 addAlbum()

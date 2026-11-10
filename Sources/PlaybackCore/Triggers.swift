@@ -25,6 +25,9 @@ public struct ConsoleTarget: Codable, Hashable, Identifiable, Sendable {
         let p = prefix.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         return p.isEmpty ? "" : "/\(p)"
     }
+
+    /// A command line for this console: "/gma3/cmd" with the text.
+    public func command(_ text: String) -> OSCMessage { OSCMessage("\(root)/cmd", [.string(text)]) }
 }
 
 public enum LaneAction: String, Codable, CaseIterable, Sendable {
@@ -170,5 +173,69 @@ public struct TriggerScheduler: Sendable {
         let step = frame - last
         guard step > 0, step <= maxStep else { return [] }
         return triggers.filter { $0.frame > last && $0.frame <= frame }.sorted { $0.frame < $1.frame }.map(\.id)
+    }
+}
+
+/// One executor to label on the console: the lane name it gets, the other names lanes gave it
+/// (when songs disagree), and which consoles it goes to.
+public struct ExecutorLabel: Equatable, Identifiable, Sendable {
+    public var page: Int
+    public var executor: Int
+    /// Every name lanes give this executor, most used first.
+    public var names: [String]
+    /// The name to send (the most used, unless changed).
+    public var name: String
+    /// Consoles the lanes send to; empty means every enabled console.
+    public var consoleIDs: [UUID]
+    /// How many lanes (across the songs) use this executor.
+    public var laneCount: Int
+
+    public var id: String { "\(page).\(executor)" }
+    public var hasConflict: Bool { names.count > 1 }
+
+    /// The executor's lanes, for working out its consoles.
+    public func targets(in consoles: [ConsoleTarget]) -> [ConsoleTarget] {
+        consoles.filter { $0.enabled && !$0.host.isEmpty && (consoleIDs.isEmpty || consoleIDs.contains($0.id)) }
+    }
+
+    /// The command line, from a template with {page}, {exec} and {name}. Double quotes in the
+    /// name become single ones so the console's command line stays intact.
+    public func command(template: String) -> String {
+        let safe = name.replacingOccurrences(of: "\"", with: "'").trimmingCharacters(in: .whitespacesAndNewlines)
+        return template
+            .replacingOccurrences(of: "{page}", with: String(page))
+            .replacingOccurrences(of: "{exec}", with: String(executor))
+            .replacingOccurrences(of: "{name}", with: safe)
+    }
+
+    public static let defaultTemplate = "Label Exec {page}.{exec} \"{name}\""
+
+    /// One label per executor from the lanes of a set of songs. Lanes without a name of their
+    /// own are left out (nothing to send). Executors in page/executor order.
+    public static func plan(lanes: [TriggerLane]) -> [ExecutorLabel] {
+        var order: [String] = []
+        var byExec: [String: (page: Int, exec: Int, counts: [String: Int], firstSeen: [String], consoles: Set<UUID>, all: Bool, lanes: Int)] = [:]
+        for lane in lanes {
+            let name = lane.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let key = "\(lane.page).\(lane.executor)"
+            var e = byExec[key] ?? (lane.page, lane.executor, [:], [], [], false, 0)
+            if byExec[key] == nil { order.append(key) }
+            if e.counts[name] == nil { e.firstSeen.append(name) }
+            e.counts[name, default: 0] += 1
+            if lane.consoleIDs.isEmpty { e.all = true } else { e.consoles.formUnion(lane.consoleIDs) }
+            e.lanes += 1
+            byExec[key] = e
+        }
+        return order.compactMap { key -> ExecutorLabel? in
+            guard let e = byExec[key] else { return nil }
+            let names = e.firstSeen.enumerated().sorted { a, b in
+                let ca = e.counts[a.element] ?? 0, cb = e.counts[b.element] ?? 0
+                return ca != cb ? ca > cb : a.offset < b.offset
+            }.map(\.element)
+            return ExecutorLabel(page: e.page, executor: e.exec, names: names, name: names[0],
+                                 consoleIDs: e.all ? [] : e.consoles.sorted { $0.uuidString < $1.uuidString }, laneCount: e.lanes)
+        }
+        .sorted { ($0.page, $0.executor) < ($1.page, $1.executor) }
     }
 }

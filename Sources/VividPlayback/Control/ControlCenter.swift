@@ -21,6 +21,8 @@ struct ControlSettings: Codable, Equatable {
     var fireEarlyMs: Double = 0
     /// A lane's key also fires its executor on the console as it records the trigger.
     var keysFire = true
+    /// The command that names an executor's sequence, for Import Labels to Console.
+    var labelTemplate = ExecutorLabel.defaultTemplate
 
     init() {}
 
@@ -43,6 +45,7 @@ struct ControlSettings: Codable, Equatable {
         consoles = try c.decodeIfPresent([ConsoleTarget].self, forKey: .consoles) ?? d.consoles
         fireEarlyMs = try c.decodeIfPresent(Double.self, forKey: .fireEarlyMs) ?? d.fireEarlyMs
         keysFire = try c.decodeIfPresent(Bool.self, forKey: .keysFire) ?? d.keysFire
+        labelTemplate = try c.decodeIfPresent(String.self, forKey: .labelTemplate) ?? d.labelTemplate
     }
 
     static func load() -> ControlSettings {
@@ -134,10 +137,16 @@ final class ControlCenter: ObservableObject {
     let triggers: TriggerService
     /// When each trigger last fired (for the gold flash in the timeline).
     @Published private(set) var firedAt: [UUID: Date] = [:]
+    /// When each lane last fired a trigger (the lane's pulse).
+    @Published private(set) var laneFiredAt: [UUID: Date] = [:]
     /// The last trigger sent, for the Consoles section.
     @Published private(set) var lastTrigger: (text: String, ok: Bool, at: Date)?
     /// Lights a trigger in the timeline as if it had just fired.
-    func flash(_ id: UUID) { firedAt[id] = Date() }
+    func flash(_ id: UUID?, lane: UUID?) {
+        let now = Date()
+        if let id { firedAt[id] = now }
+        if let lane { laneFiredAt[lane] = now }
+    }
     /// Set by the app model: re-arm triggers when consoles or timing change.
     var onTriggerSettingsChange: (() -> Void)?
     private let netQueue = DispatchQueue(label: "vivid.network.in", qos: .userInteractive)
@@ -157,8 +166,8 @@ final class ControlCenter: ObservableObject {
     init(clock: OutputClock) {
         sender = TimecodeSender(clock: clock, midi: midi)
         triggers = TriggerService(clock: clock)
-        triggers.onFire = { [weak self] id in
-            Task { @MainActor in self?.firedAt[id] = Date() }
+        triggers.onFire = { [weak self] id, laneID in
+            Task { @MainActor in self?.flash(id, lane: laneID) }
         }
         triggers.onSend = { [weak self] text, ok in
             Task { @MainActor in self?.lastTrigger = (text, ok, Date()) }

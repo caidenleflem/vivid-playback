@@ -326,6 +326,15 @@ struct ConnectionsView: View {
                 SectionHeader(title: "Consoles",
                               detail: "Trigger lanes in the timeline fire executors on these over OSC, on time with the music.")
                 Spacer()
+                Button { model.labelsShown = true } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "tag").font(.system(size: 12, weight: .semibold))
+                        Text("Import labels to console")
+                    }
+                }
+                .buttonStyle(QuietButtonStyle())
+                .disabled(control.settings.consoles.isEmpty || model.show == nil)
+                .help("Name each lane's executor on the console after the lane")
                 if let last = control.lastTrigger, Date().timeIntervalSince(last.at) < 120 {
                     HStack(spacing: 8) {
                         StatusDot(color: last.ok ? Brand.ok : Brand.warn)
