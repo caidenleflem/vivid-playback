@@ -43,6 +43,7 @@ jobs:
           ls "$APP/Contents/Resources/Fonts" "$APP/Contents/Resources/Images" "$APP/Contents/Resources/AppIcon.icns"
 
       - name: Launch it on each screen and take screenshots
+        timeout-minutes: 15
         run: |
           mkdir -p build/screens
           BIN="build/Vivid Playback.app/Contents/MacOS/Vivid Playback"
@@ -55,8 +56,11 @@ jobs:
             WSPID=$(pgrep -x WindowServer | head -1)
             top -l 3 -s 2 -pid "$PID" -stats cpu | tail -1 > "build/screens/$screen.cpu" &
             T1=$!
-            if [ -n "$WSPID" ]; then top -l 3 -s 2 -pid "$WSPID" -stats cpu | tail -1 > "build/screens/$screen.ws" & fi
-            wait $T1 2>/dev/null; wait 2>/dev/null
+            T2=""
+            if [ -n "$WSPID" ]; then top -l 3 -s 2 -pid "$WSPID" -stats cpu | tail -1 > "build/screens/$screen.ws" & T2=$!; fi
+            # Wait for the two measurements only (a bare `wait` would wait for the app too).
+            wait $T1 2>/dev/null || true
+            if [ -n "$T2" ]; then wait $T2 2>/dev/null || true; fi
             echo "CPU on $screen: app $(cat build/screens/$screen.cpu 2>/dev/null)% · window server $(cat build/screens/$screen.ws 2>/dev/null)%"
             sleep 2
             screencapture -x "build/screens/$screen.png" || true
