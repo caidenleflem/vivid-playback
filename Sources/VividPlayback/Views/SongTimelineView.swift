@@ -226,6 +226,8 @@ struct TimelinePanel: View {
                         }
                     }
                     .overlay(alignment: .topLeading) {
+                      // An explicit top-left stack: the overlay's own grouping centres its pieces on each other.
+                      ZStack(alignment: .topLeading) {
                         if let loop = transport.loop {
                             let x0 = min(trackWidth, max(0, CGFloat(win.x(loop.lowerBound, width: Double(trackWidth)))))
                             let x1 = min(trackWidth, max(0, CGFloat(win.x(loop.upperBound, width: Double(trackWidth)))))
@@ -241,6 +243,7 @@ struct TimelinePanel: View {
                             playhead(position: position, height: linesBottom - 18)
                                 .offset(x: labelWidth + 12 + playheadX - 1)
                         }
+                      }
                     }
                     .contentShape(Rectangle())
                     .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { value in
