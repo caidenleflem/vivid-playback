@@ -97,6 +97,9 @@ enum ImportState {
 
 enum Screen: Equatable {
     case firstRun, library, timeline, clock, albums, connections
+
+    /// The pages that share the sidebar: moving between them changes only the page.
+    var hasSidebar: Bool { self == .library || self == .albums || self == .connections }
 }
 
 /// The song as it was before the last fix, so it can be put back.
@@ -114,6 +117,8 @@ struct MarkerEdit: Identifiable {
 @MainActor
 final class AppModel: ObservableObject {
     @Published var screen: Screen = .firstRun
+    /// The screen before the last move (decides how a page comes in).
+    private(set) var previousScreen: Screen = .firstRun
     @Published var show: Show? { didSet { syncTriggers() } }
     @Published var packageURL: URL?
     @Published var issues: [ShowIssue] = []
@@ -181,6 +186,12 @@ final class AppModel: ObservableObject {
     }
     /// The notice offers Undo (for the fix it reports).
     @Published var noticeOffersUndo = false
+    /// An Undo for the notice that isn't a fix or a marker change (deleting an album).
+    var noticeUndoAction: (() -> Void)?
+    /// The Add Album sheet (the same import options as a new show).
+    @Published var addAlbumShown = false
+    /// Where Cancel on the import screen goes back to, when a show is already open.
+    @Published var importReturn: Screen?
 
     let transport = Transport()
     lazy var control = ControlCenter(clock: transport.clock)
@@ -222,7 +233,7 @@ final class AppModel: ObservableObject {
     func refreshDevices() { devices = AudioDevices.all() }
 
     /// While a sheet is open, single-key shortcuts (Space, M, L, arrows) stay out of the way of typing.
-    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown || laneEdit != nil || typingInField }
+    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown || laneEdit != nil || typingInField || addAlbumShown }
 
     static var showsFolder: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Vivid Playback")
@@ -254,6 +265,148 @@ final class AppModel: ObservableObject {
         if let list = show?.setlists.first(where: { $0.id == setlistID }) { select(setlist: list) }
         sort = .setlist
         go(.library)
+    }
+
+    // MARK: Adding and deleting albums
+
+    /// Add Album: the new-show import options, in a sheet over the Albums page.
+    func addAlbum() {
+        guard !locked else { return }
+        if case .finished = importState {} else if case .running = importState {} else { importState = .idle }
+        addAlbumShown = true
+    }
+
+    /// Deletes one album. A show with other setlists keeps its songs and loses this setlist; a
+    /// show's last album takes the show file with it, to the Trash. Either way Undo puts it back.
+    func deleteAlbum(_ entry: ShowLibrary.Entry, setlistID: UUID) {
+        guard !locked else { return }
+        let isCurrent = entry.url.standardizedFileURL == packageURL?.standardizedFileURL
+        let current = isCurrent ? (show ?? entry.show) : entry.show
+        guard let index = current.setlists.firstIndex(where: { $0.id == setlistID }) else { return }
+        let removed = current.setlists[index]
+        if isCurrent && transport.isPlaying && setlist?.id == setlistID {
+            post("Stop playback before deleting the album that's playing.")
+            return
+        }
+        if current.setlists.count > 1 {
+            var target = current
+            target.setlists.remove(at: index)
+            apply(target, to: entry.url, isCurrent: isCurrent)
+            if isCurrent, selectedSetlistID == setlistID { selectedSetlistID = target.setlists.first?.id }
+            refreshLibrary()
+            postUndo("Deleted \(removed.name).") { [weak self] in
+                guard let self else { return }
+                let now = entry.url.standardizedFileURL == self.packageURL?.standardizedFileURL
+                guard var back = now ? self.show : (try? ShowStore.load(from: entry.url)) else { return }
+                back.setlists.insert(removed, at: min(index, back.setlists.count))
+                self.apply(back, to: entry.url, isCurrent: now)
+                self.refreshLibrary()
+            }
+            return
+        }
+        // The show's only album: the show goes to the Trash.
+        if isCurrent {
+            guard !transport.isPlaying else { post("Stop playback before deleting the show that's playing."); return }
+            save()
+        }
+        var trashed: NSURL?
+        do {
+            try FileManager.default.trashItem(at: entry.url, resultingItemURL: &trashed)
+        } catch {
+            post("Couldn't move \(entry.url.lastPathComponent) to the Trash: \(error.localizedDescription)")
+            return
+        }
+        if isCurrent { closeShow() }
+        library.removeAll { $0.url.standardizedFileURL == entry.url.standardizedFileURL }
+        refreshLibrary()
+        let name = current.name
+        postUndo("Moved \(name) to the Trash.") { [weak self] in
+            guard let self, let from = trashed.map({ $0 as URL }) else { return }
+            do {
+                try FileManager.default.moveItem(at: from, to: entry.url)
+                self.refreshLibrary()
+                if self.show == nil { self.open(package: entry.url); self.go(.albums) }
+            } catch {
+                self.post("Couldn't bring \(name) back. It's in the Trash.")
+            }
+        }
+    }
+
+    /// Add Album › Open show file…: pick a .vividshow to add to Albums.
+    func chooseShowFileForAlbums() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.treatsFilePackagesAsDirectories = false
+        panel.prompt = "Add to Albums"
+        panel.message = "Choose a Vivid Playback show (.vividshow)."
+        if panel.runModal() == .OK, let url = panel.url { addShowFile(url) }
+    }
+
+    /// Copies a show file into ~/Documents/Vivid Playback so it appears in Albums. The original
+    /// (on a USB stick, say) is left as it is.
+    func addShowFile(_ url: URL) {
+        guard url.pathExtension == ShowStore.fileExtension, let show = try? ShowStore.load(from: url) else {
+            importState = .failed("\(url.lastPathComponent) isn't a Vivid Playback show. Drop a show folder to import one.")
+            return
+        }
+        let inLibrary = url.deletingLastPathComponent().standardizedFileURL == Self.showsFolder.standardizedFileURL
+        if !inLibrary {
+            let dest = newPackage(for: show)
+            do {
+                try FileManager.default.copyItem(at: url, to: dest)
+            } catch {
+                importState = .failed("Couldn't copy \(url.lastPathComponent): \(error.localizedDescription)")
+                return
+            }
+        }
+        importState = .idle
+        addAlbumShown = false
+        refreshLibrary()
+        go(.albums)
+        post(inLibrary ? "\(show.name) is already in Albums." : "Added \(show.name) to Albums.")
+    }
+
+    /// Saves a changed show, to the open show or to its package on disk.
+    private func apply(_ target: Show, to package: URL, isCurrent: Bool) {
+        if isCurrent {
+            show = target
+            save()
+        } else {
+            try? ShowStore.save(target, to: package)
+        }
+    }
+
+    /// Closes the open show (after its file went to the Trash): another saved show opens if there
+    /// is one, otherwise the import screen.
+    private func closeShow() {
+        transport.pause()
+        UserDefaults.standard.removeObject(forKey: "lastShowPath")
+        let others = library.filter { $0.url.standardizedFileURL != packageURL?.standardizedFileURL }
+        if let next = others.first {
+            open(package: next.url)
+            go(.albums)
+        } else {
+            show = nil
+            packageURL = nil
+            currentSongID = nil
+            issues = []
+            importState = .idle
+            importReturn = nil
+            go(.firstRun)
+        }
+    }
+
+    private func postUndo(_ text: String, _ action: @escaping () -> Void) {
+        post(text)
+        noticeUndoAction = action
+    }
+
+    func runNoticeUndo() {
+        let action = noticeUndoAction
+        noticeUndoAction = nil
+        withAnimation(.vivid(0.3)) { notice = nil }
+        action?()
     }
 
     private func editSetlist(_ change: (inout Setlist) -> Void) {
@@ -432,9 +585,30 @@ final class AppModel: ObservableObject {
     // MARK: Screens
 
     func go(_ target: Screen) {
-        guard show != nil || target == .firstRun else { return }
+        guard show != nil || target == .firstRun, target != screen else { return }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.18) : .vivid(0.55)) { screen = target }
+        // Pages beside the sidebar swap quickly; the morphs into the timeline and clock take
+        // their time; reduced motion is a short crossfade.
+        let animation: Animation
+        if reduceMotion {
+            animation = .easeInOut(duration: 0.18)
+        } else if screen.hasSidebar && target.hasSidebar {
+            animation = .vivid(0.32)
+        } else if screen == .firstRun || target == .firstRun {
+            animation = .vivid(0.45)
+        } else {
+            animation = .vivid(0.55)
+        }
+        previousScreen = screen
+        withAnimation(animation) { screen = target }
+    }
+
+    /// Cancel on the import screen: back where you were, with the open show.
+    func cancelImport() {
+        importState = .idle
+        let back = importReturn ?? .library
+        importReturn = nil
+        go(back)
     }
 
     func toggleTimeline() { go(screen == .timeline ? .library : .timeline) }
@@ -1136,6 +1310,7 @@ final class AppModel: ObservableObject {
     func post(_ text: String, undo: Bool = false, markerUndo: Bool = false) {
         noticeOffersUndo = undo
         noticeOffersMarkerUndo = markerUndo
+        noticeUndoAction = nil
         withAnimation(.vivid(0.3)) { notice = text }
         Task {
             try? await Task.sleep(nanoseconds: 7_000_000_000)
@@ -1201,17 +1376,52 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Opens an imported show and saves it as a package in ~/Documents/Vivid Playback.
-    func openImported(_ report: ImportReport) {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Vivid Playback")
-        let package = docs.appendingPathComponent("\(report.show.name).\(ShowStore.fileExtension)")
+    /// Where an imported show is kept: ~/Documents/Vivid Playback, under a name no other show has.
+    private func newPackage(for show: Show) -> URL {
+        try? FileManager.default.createDirectory(at: Self.showsFolder, withIntermediateDirectories: true)
+        return ShowLibrary.uniquePackageURL(named: show.name, in: Self.showsFolder)
+    }
+
+    private func prepared(_ report: ImportReport) -> Show {
         var show = report.show
         // Start on this Mac's interface; Caiden picks the timecode output once.
         if show.routing.deviceUID == nil { show.routing.deviceUID = AudioDevices.defaultOutput()?.uid }
-        load(show, package: package, issues: report.issues)
+        return show
+    }
+
+    /// Adds an imported show to the Albums page without opening it (playback carries on).
+    func saveImported(_ report: ImportReport) {
+        let show = prepared(report)
+        let package = newPackage(for: show)
+        do {
+            try ShowStore.save(show, to: package)
+        } catch {
+            importState = .failed("Couldn't save \(show.name): \(error.localizedDescription)")
+            return
+        }
+        importState = .idle
+        addAlbumShown = false
+        refreshLibrary()
+        go(.albums)
+        let n = show.setlists.count
+        post("Added \(show.name) to Albums\(n > 1 ? " (\(n) albums)" : "").")
+    }
+
+    /// Opens an imported show and saves it as a package in ~/Documents/Vivid Playback.
+    func openImported(_ report: ImportReport) {
+        guard !transport.isPlaying || show == nil else {
+            post("Stop playback before opening another show. You can add it to Albums now and open it later.")
+            return
+        }
+        let show = prepared(report)
+        load(show, package: newPackage(for: show), issues: report.issues)
         save()
         importState = .idle
-        go(.library)
+        let fromAlbums = addAlbumShown || importReturn == .albums
+        addAlbumShown = false
+        importReturn = nil
+        refreshLibrary()
+        go(fromAlbums ? .albums : .library)
         if needsTimecodeOutput { outputShown = true }
     }
 
@@ -1350,11 +1560,13 @@ final class AppModel: ObservableObject {
         guard !locked else { return }
         transport.pause()
         importState = .idle
+        importReturn = show == nil ? nil : (screen == .firstRun ? .library : screen)
         go(.firstRun)
     }
 
     private func runDemo(_ name: String) {
         var demoZoom = false
+        var demoAddAlbum = false
         let target: Screen
         switch name {
         case "library": target = .library
@@ -1364,6 +1576,7 @@ final class AppModel: ObservableObject {
         case "connections": target = .connections
         case "consoles": target = .connections; connectionsAnchor = "consoles"
         case "albums": target = .albums
+        case "add-album": target = .albums; demoAddAlbum = true
         default: return
         }
         if target == .connections {
@@ -1372,6 +1585,7 @@ final class AppModel: ObservableObject {
             control.settings.oscIn = true
         }
         let zoomIn = demoZoom
+        let addAlbumSheet = demoAddAlbum
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
         let reader = self.reader
         Task {
@@ -1430,6 +1644,10 @@ final class AppModel: ObservableObject {
             }
             screen = target
             if !zoomIn { transport.play() }
+            if addAlbumSheet {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                addAlbum()
+            }
         }
     }
 

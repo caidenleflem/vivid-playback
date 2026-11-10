@@ -4,39 +4,101 @@ import PlaybackCore
 /// One screen: drop the show folder. Everything else is found and checked for you.
 struct FirstRunView: View {
     @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ImportFlow(mode: .newShow)
+            .padding(.horizontal, 44)
+            .padding(.top, 40)
+            .padding(.bottom, 36)
+            .frame(width: 640)
+            .glass(cornerRadius: 24, alpha: 0.64)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            // Anywhere in the window takes a drop, not just the card.
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let url = urls.first else { return false }
+                if case .running = model.importState { return false }
+                model.importFolder(url)
+                return true
+            }
+    }
+}
+
+/// Add Album: the same import, in a sheet over the Albums page. A show imported here is added
+/// to Albums without interrupting what's playing; open it now if nothing is.
+struct AddAlbumSheet: View {
+    var body: some View {
+        ImportFlow(mode: .addAlbum)
+            .padding(.horizontal, 36)
+            .padding(.top, 30)
+            .padding(.bottom, 28)
+            .frame(width: 620)
+            .background(Brand.phantom)
+            .preferredColorScheme(.dark)
+    }
+}
+
+/// Drop a folder, choose one, open a show file or try the example; then see what was found.
+struct ImportFlow: View {
+    enum Mode { case newShow, addAlbum }
+    let mode: Mode
+    @EnvironmentObject private var model: AppModel
     @State private var targeted = false
 
     var body: some View {
         VStack(spacing: 18) {
-            Emblem(width: 54)
-            switch model.importState {
-            case .idle, .failed:
-                dropPrompt
-            case .running(let step):
-                progress(step)
-            case .finished(let report):
-                results(report)
+            if mode == .newShow { Emblem(width: 54) }
+            Group {
+                switch model.importState {
+                case .idle, .failed:
+                    dropPrompt
+                case .running(let step):
+                    progress(step)
+                case .finished(let report):
+                    results(report)
+                }
             }
+            .transition(.opacity)
         }
-        .padding(.horizontal, 44)
-        .padding(.top, 40)
-        .padding(.bottom, 36)
-        .frame(width: 640)
-        .glass(cornerRadius: 24, alpha: 0.64)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.vivid(0.35), value: stateKey)
         .dropDestination(for: URL.self) { urls, _ in
-            guard let url = urls.first else { return false }
-            model.importFolder(url)
+            guard let url = urls.first, !isRunning else { return false }
+            importDropped(url)
             return true
         } isTargeted: { targeted = $0 }
     }
 
+    private var stateKey: Int {
+        switch model.importState {
+        case .idle: return 0
+        case .failed: return 1
+        case .running: return 2
+        case .finished: return 3
+        }
+    }
+
+    private var isRunning: Bool {
+        if case .running = model.importState { return true }
+        return false
+    }
+
+    /// A show file dropped on Add Album is added as it is; anything else is imported.
+    private func importDropped(_ url: URL) {
+        if mode == .addAlbum && url.pathExtension == ShowStore.fileExtension {
+            model.addShowFile(url)
+        } else {
+            model.importFolder(url)
+        }
+    }
+
     private var dropPrompt: some View {
         VStack(spacing: 18) {
-            Text("Drop your show folder here")
-                .font(.manrope(32, .semibold))
+            Text(mode == .addAlbum ? "Add an album" : "Drop your show folder here")
+                .font(.manrope(mode == .addAlbum ? 26 : 32, .semibold))
                 .foregroundStyle(Brand.ink)
-            Text("Put the offset sheet, the masters and the timecode files in one folder. Vivid Playback matches them up and checks every song.")
+            Text(mode == .addAlbum
+                 ? "Drop a show folder: the offset sheet, the masters and the timecode files. Each setlist in it becomes an album."
+                 : "Put the offset sheet, the masters and the timecode files in one folder. Vivid Playback matches them up and checks every song.")
                 .font(.manrope(14.5))
                 .foregroundStyle(Brand.steel)
                 .multilineTextAlignment(.center)
@@ -63,11 +125,40 @@ struct FirstRunView: View {
                     .frame(maxWidth: 480)
             }
             HStack(spacing: 10) {
+                if cancelTitle != nil {
+                    Button(cancelTitle ?? "") { cancel() }
+                        .buttonStyle(QuietButtonStyle())
+                        .keyboardShortcut(.cancelAction)
+                    Spacer(minLength: 0)
+                }
                 Button("Choose folder…") { model.chooseFolder() }
+                    .buttonStyle(QuietButtonStyle(prominent: mode == .addAlbum))
+                Button("Open show file…") {
+                    if mode == .addAlbum { model.chooseShowFileForAlbums() } else { model.openShowPanel() }
+                }
                     .buttonStyle(QuietButtonStyle())
+                    .help("A .vividshow saved on this Mac, a USB stick or another drive")
                 Button("Try the example show") { model.tryExampleShow() }
-                    .buttonStyle(QuietButtonStyle(prominent: true))
+                    .buttonStyle(QuietButtonStyle(prominent: mode == .newShow))
             }
+        }
+    }
+
+    /// Add Album always has Cancel; the import screen has it when a show is already open.
+    private var cancelTitle: String? {
+        switch mode {
+        case .addAlbum: return "Cancel"
+        case .newShow: return model.show != nil ? "Cancel" : nil
+        }
+    }
+
+    private func cancel() {
+        switch mode {
+        case .addAlbum:
+            model.importState = .idle
+            model.addAlbumShown = false
+        case .newShow:
+            model.cancelImport()
         }
     }
 
@@ -114,9 +205,20 @@ struct FirstRunView: View {
             HStack(spacing: 10) {
                 Button("Start over") { model.importState = .idle }
                     .buttonStyle(QuietButtonStyle())
-                Button("Open show") { model.openImported(report) }
-                    .buttonStyle(QuietButtonStyle(prominent: true))
-                    .keyboardShortcut(.defaultAction)
+                if mode == .addAlbum {
+                    Spacer(minLength: 0)
+                    Button("Add and open") { model.openImported(report) }
+                        .buttonStyle(QuietButtonStyle())
+                        .disabled(model.transport.isPlaying)
+                        .help(model.transport.isPlaying ? "Stop playback to open it now. Add it, and open it from Albums later." : "Add it to Albums and open it")
+                    Button("Add to Albums") { model.saveImported(report) }
+                        .buttonStyle(QuietButtonStyle(prominent: true))
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Open show") { model.openImported(report) }
+                        .buttonStyle(QuietButtonStyle(prominent: true))
+                        .keyboardShortcut(.defaultAction)
+                }
             }
         }
     }

@@ -310,3 +310,21 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   lanes as new lanes, skipping any executor/action the song already has; keys already used on the
   song are left off the copy.
 - Consoles page counts lanes across the whole show. 94 tests pass.
+
+## 2026-11-10: add and delete albums, cleaner transitions
+
+- Add album: a sheet with the new-show import (shared `ImportFlow` with the first-run screen):
+  drop/choose a folder, open a show file (copied into the library), try the example. Results offer
+  Add to Albums (saved, not opened, so playback carries on) and Add and open (disabled while
+  playing). The import screen now has Cancel when a show is open, and takes drops anywhere.
+- Imports never overwrite an existing show of the same name (`ShowLibrary.uniquePackageURL`,
+  tested); before, re-importing a folder replaced the saved show and its markers.
+- Delete album (confirmation dialog): removes the setlist when the show has others; a show's last
+  album moves the show file to the Trash. Undo restores either (moves it back from the Trash).
+  Deleting the open show opens the next saved show, or the import screen if there's none. Blocked
+  while that album is playing.
+- Transitions: one persistent sidebar for Albums / Now playing / Connections; only the page beside
+  it changes (fade with a 10 pt rise, 0.32 s critically damped). Timeline and clock morphs keep
+  0.55 s; first run 0.45 s with a slight scale; Reduce Motion is a 0.18 s crossfade with no
+  movement. Moving to the screen you're on does nothing (no re-animation).
+- 95 tests pass.

@@ -131,10 +131,6 @@ struct ConnectionsView: View {
     @EnvironmentObject private var control: ControlCenter
 
     var body: some View {
-        HStack(spacing: 0) {
-            Sidebar()
-                .frame(width: 224)
-                .padding(10)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 34) {
@@ -155,7 +151,6 @@ struct ConnectionsView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo(anchor, anchor: .top) }
                 }
             }
-        }
         .onAppear { control.refreshDevices() }
     }
 

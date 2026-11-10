@@ -28,11 +28,6 @@ struct LibraryView: View {
     let morph: Namespace.ID
 
     var body: some View {
-        HStack(spacing: 0) {
-            Sidebar()
-                .frame(width: 224)
-                .padding(10)
-                .transition(.move(edge: .leading).combined(with: .opacity))
             VStack(spacing: 0) {
                 PlayerBar(morph: morph)
                     .padding(.top, 12)
@@ -50,7 +45,6 @@ struct LibraryView: View {
                     .padding(.bottom, 12)
             }
             .padding(.trailing, 14)
-        }
     }
 }
 

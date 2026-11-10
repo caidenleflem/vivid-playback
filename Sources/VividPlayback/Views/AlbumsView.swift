@@ -25,16 +25,15 @@ struct AlbumCover: View {
 /// Every saved show, grouped by artist, one album per setlist.
 struct AlbumsView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var transport: Transport
     @State private var dropTarget: UUID?
+    /// The album waiting for Delete to be confirmed.
+    @State private var pendingDelete: (entry: ShowLibrary.Entry, setlist: Setlist)?
 
     var body: some View {
-        HStack(spacing: 0) {
-            Sidebar()
-                .frame(width: 224)
-                .padding(10)
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
-                    Text("Albums").font(.manrope(34, .bold)).foregroundStyle(Brand.ink).padding(.top, 70)
+                    header
                     if entries.isEmpty {
                         VStack(spacing: 16) {
                             Image(systemName: "square.stack")
@@ -43,7 +42,7 @@ struct AlbumsView: View {
                             Text("Your shows live here").font(.manrope(22, .semibold)).foregroundStyle(Brand.ink)
                             Text("Every imported show appears as albums, one per setlist, grouped by artist.")
                                 .font(.manrope(14)).foregroundStyle(Brand.steel).multilineTextAlignment(.center)
-                            Button("Import a show…") { model.chooseFolder() }.buttonStyle(QuietButtonStyle(prominent: true))
+                            Button("Add an album…") { model.addAlbum() }.buttonStyle(QuietButtonStyle(prominent: true))
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 80)
@@ -55,7 +54,9 @@ struct AlbumsView: View {
                                       alignment: .leading, spacing: 26) {
                                 ForEach(group.albums, id: \.setlist.id) { album in
                                     card(album.entry, album.setlist)
+                                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
                                 }
+                                if group.artist == groups.last?.artist { addCard }
                             }
                         }
                     }
@@ -63,9 +64,79 @@ struct AlbumsView: View {
                 .padding(.horizontal, 28)
                 .padding(.bottom, 40)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(.vivid(0.35), value: albumIDs)
             }
-        }
         .onAppear { model.refreshLibrary() }
+        .confirmationDialog(deleteTitle, isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button(deleteButton, role: .destructive) {
+                if let p = pendingDelete { model.deleteAlbum(p.entry, setlistID: p.setlist.id) }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text(deleteMessage)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Albums").font(.manrope(34, .bold)).foregroundStyle(Brand.ink)
+            Spacer()
+            Button { model.addAlbum() } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "plus").font(.system(size: 12, weight: .bold))
+                    Text("Add album")
+                }
+            }
+            .buttonStyle(QuietButtonStyle())
+            .disabled(model.locked)
+            .help("Import a show folder, open a show file, or try the example")
+        }
+        .padding(.top, 70)
+    }
+
+    /// The dashed "add" tile at the end of the grid.
+    private var addCard: some View {
+        Button { model.addAlbum() } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                    .foregroundStyle(.white.opacity(0.16))
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.02)))
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        Image(systemName: "plus").font(.system(size: 22, weight: .semibold)).foregroundStyle(Brand.gold)
+                            .frame(width: 52, height: 52)
+                            .background(Circle().fill(Brand.gold.opacity(0.12)))
+                    }
+                Text("Add album").font(.manrope(14, .semibold)).foregroundStyle(Brand.ink)
+                Text("Import a show").font(.manrope(12)).foregroundStyle(Brand.space)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.locked)
+    }
+
+    private var albumIDs: [UUID] { groups.flatMap { $0.albums.map(\.setlist.id) } }
+
+    private var deleteTitle: String {
+        guard let p = pendingDelete else { return "" }
+        return p.entry.show.setlists.count > 1 ? "Delete “\(p.setlist.name)”?" : "Delete “\(p.entry.show.name)”?"
+    }
+
+    private var deleteButton: String {
+        guard let p = pendingDelete else { return "Delete" }
+        return p.entry.show.setlists.count > 1 ? "Delete Album" : "Move Show to Trash"
+    }
+
+    private var deleteMessage: String {
+        guard let p = pendingDelete else { return "" }
+        if p.entry.show.setlists.count > 1 {
+            return "The setlist goes; its songs, markers and triggers stay in \(p.entry.show.name). You can undo this."
+        }
+        return "It's the show's only album, so the show file goes to the Trash with its markers and triggers. Your audio files aren't touched. You can undo this."
     }
 
     /// Saved shows, plus the open one if it's kept somewhere else.
@@ -115,6 +186,12 @@ struct AlbumsView: View {
             Button("Open") { model.openAlbum(entry, setlistID: list.id) }
             Button("Choose Cover…") { model.chooseArtwork(for: list.id, in: entry) }.disabled(model.locked)
             if list.artwork != nil { Button("Remove Cover") { model.setArtwork(nil, for: list.id, in: entry) }.disabled(model.locked) }
+            Divider()
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) }
+            Button(entry.show.setlists.count > 1 ? "Delete Album…" : "Delete Show…", role: .destructive) {
+                pendingDelete = (entry, list)
+            }
+            .disabled(model.locked || (isOpen && transport.isPlaying))
         }
         .help("Click to open. Drop an image here to use it as the cover.")
     }

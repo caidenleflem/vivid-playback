@@ -87,4 +87,14 @@ final class LibraryTests: XCTestCase {
         let path = try ShowLibrary.storeArtwork(img, for: report.show.setlists[0], in: dir.appendingPathComponent("A.vividshow"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("A.vividshow").appendingPathComponent(path).path))
     }
+
+    func testNewShowsNeverReplaceAnExistingOne() {
+        let folder = URL(fileURLWithPath: "/shows")
+        let taken: Set<String> = ["/shows/Tour.vividshow", "/shows/Tour 2.vividshow"]
+        let url = ShowLibrary.uniquePackageURL(named: "Tour", in: folder) { taken.contains($0.path) }
+        XCTAssertEqual(url.lastPathComponent, "Tour 3.vividshow")
+        XCTAssertEqual(ShowLibrary.uniquePackageURL(named: "New", in: folder) { _ in false }.lastPathComponent, "New.vividshow")
+        XCTAssertEqual(ShowLibrary.uniquePackageURL(named: "A/B: C", in: folder) { _ in false }.lastPathComponent, "A-B- C.vividshow")
+        XCTAssertEqual(ShowLibrary.uniquePackageURL(named: "  ", in: folder) { _ in false }.lastPathComponent, "Show.vividshow")
+    }
 }

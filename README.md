@@ -87,6 +87,15 @@ fader lanes send `/gma3/Page1/Fader201` with a level from 0 to 100.
 and the timecode output. On a two-output Mac, put the master on Output 1 (mono) and timecode on
 Output 2. The timecode level is set on its own and never follows the master level.
 
+**Albums:** every saved show, grouped by artist, one album per setlist. **Add album** (or
+**File › Add Album…**, ⇧⌘N) offers the same choices as a new show: drop or choose a show folder,
+open a .vividshow file (from a USB stick, say: it's copied in, the original is left alone), or try
+the example. An imported show is added to Albums without interrupting playback; **Add and open**
+opens it when nothing's playing. Right-click an album to **Delete** it: a show with several
+setlists just loses that setlist (its songs, markers and triggers stay); a show's last album sends
+the show file to the Trash. Your audio files are never touched, and Undo puts it back. An import
+never replaces a show of the same name; it's saved as "Name 2".
+
 **Saving:** every change saves itself to `~/Documents/Vivid Playback/<show>.vividshow`, and the
 last show reopens on launch, including after installing a new version. **File › Save** (⌘S)
 saves once more and says where; **Save a Copy…** (⇧⌘S) makes a backup or a copy for a USB

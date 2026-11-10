@@ -39,6 +39,9 @@ struct PlaybackCommands: Commands {
             Button("New Show…") { model.newShow() }
                 .keyboardShortcut("n")
                 .disabled(model.locked)
+            Button("Add Album…") { model.go(.albums); model.addAlbum() }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(model.locked || model.show == nil)
             Button("Open Show…") { model.openShowPanel() }
                 .keyboardShortcut("o")
                 .disabled(model.locked)
@@ -153,6 +156,14 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
     @Namespace private var morph
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// A page arriving beside the sidebar rises a few points as it fades in; the one leaving just
+    /// fades. Coming back from the timeline, the morph does the work and the page only fades.
+    private var pageTransition: AnyTransition {
+        guard !reduceMotion, model.previousScreen.hasSidebar else { return .opacity }
+        return .asymmetric(insertion: .opacity.combined(with: .offset(y: 10)), removal: .opacity)
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -163,17 +174,31 @@ struct RootView: View {
             }
             switch model.screen {
             case .firstRun:
-                FirstRunView().transition(.opacity)
-            case .library:
-                LibraryView(morph: morph)
-            case .timeline:
-                SongTimelineView(morph: morph)
+                FirstRunView().transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
             case .clock:
                 ClockScreen(morph: morph).transition(.opacity)
-            case .albums:
-                AlbumsView().transition(.opacity)
-            case .connections:
-                ConnectionsView().transition(.opacity)
+            default:
+                // One sidebar for Albums, Now playing and Connections: it stays put while the page
+                // beside it changes, and slides away for the timeline.
+                HStack(spacing: 0) {
+                    if model.screen.hasSidebar {
+                        Sidebar()
+                            .frame(width: 224)
+                            .padding(10)
+                            .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
+                    }
+                    ZStack {
+                        switch model.screen {
+                        case .library: LibraryView(morph: morph).transition(pageTransition)
+                        case .albums: AlbumsView().transition(pageTransition)
+                        case .connections: ConnectionsView().transition(pageTransition)
+                        case .timeline: SongTimelineView(morph: morph)
+                        default: EmptyView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+                .transition(.opacity)
             }
             if let notice = model.notice, model.screen != .firstRun {
                 VStack {
@@ -187,6 +212,8 @@ struct RootView: View {
                             Button("Undo") { model.undoFix() }.buttonStyle(QuietButtonStyle())
                         } else if model.noticeOffersMarkerUndo && model.canUndoMarkers {
                             Button("Undo") { model.undoMarkers() }.buttonStyle(QuietButtonStyle())
+                        } else if model.noticeUndoAction != nil {
+                            Button("Undo") { model.runNoticeUndo() }.buttonStyle(QuietButtonStyle())
                         }
                     }
                         .padding(.horizontal, 18)
@@ -216,6 +243,7 @@ struct RootView: View {
         .sheet(isPresented: $model.setlistEditorShown) { SetlistEditor().environmentObject(model) }
         .sheet(isPresented: $model.goToShown) { GoToSheet().environmentObject(model) }
         .sheet(isPresented: $model.showInfoShown) { ShowInfoSheet().environmentObject(model) }
+        .sheet(isPresented: $model.addAlbumShown) { AddAlbumSheet().environmentObject(model) }
         .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song).environmentObject(model) }
         .sheet(item: $model.laneEdit) { lane in LaneEditor(lane: lane).environmentObject(model).environmentObject(model.control) }
     }

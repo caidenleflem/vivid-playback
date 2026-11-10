@@ -112,6 +112,21 @@ public enum ShowLibrary {
             .sorted { ($0.show.artist ?? $0.show.name).localizedStandardCompare($1.show.artist ?? $1.show.name) == .orderedAscending }
     }
 
+    /// Where a new show called `name` can be saved in `folder` without replacing one already
+    /// there: "Name.vividshow", then "Name 2.vividshow", "Name 3.vividshow"…
+    public static func uniquePackageURL(named name: String, in folder: URL,
+                                        exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> URL {
+        var base = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if base.isEmpty || base.hasPrefix(".") { base = "Show" + base }
+        func url(_ n: Int) -> URL {
+            folder.appendingPathComponent(n == 1 ? "\(base).\(ShowStore.fileExtension)" : "\(base) \(n).\(ShowStore.fileExtension)")
+        }
+        var n = 1
+        while exists(url(n)) && n < 10_000 { n += 1 }
+        return url(n)
+    }
+
     /// Copies an image into the show package as a setlist's cover; returns its path in the package.
     public static func storeArtwork(_ image: URL, for setlist: Setlist, in package: URL) throws -> String {
         let folder = package.appendingPathComponent("Artwork")
