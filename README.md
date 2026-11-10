@@ -93,7 +93,10 @@ open a .vividshow file (from a USB stick, say: it's copied in, the original is l
 the example. An imported show is added to Albums without interrupting playback; **Add and open**
 opens it when nothing's playing. Right-click an album to **Delete** it: a show with several
 setlists just loses that setlist (its songs, markers and triggers stay); a show's last album sends
-the show file to the Trash. Your audio files are never touched, and Undo puts it back. An import
+the show file to the Trash. Your audio files are never touched, and Undo puts it back.
+Give a new show its artist (pick one already in Albums or type a new one) and name before adding
+it; right-click any album › **Show Info…** to change them later. **Search** (⌘F) at the top of
+Albums finds artists, shows and setlists as you type. An import
 never replaces a show of the same name; it's saved as "Name 2".
 
 **Saving:** every change saves itself to `~/Documents/Vivid Playback/<show>.vividshow`, and the

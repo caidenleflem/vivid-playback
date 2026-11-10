@@ -190,6 +190,8 @@ final class AppModel: ObservableObject {
     var noticeUndoAction: (() -> Void)?
     /// The Add Album sheet (the same import options as a new show).
     @Published var addAlbumShown = false
+    /// Show Info for an album that isn't the open show.
+    @Published var showInfoEntry: ShowLibrary.Entry?
     /// Where Cancel on the import screen goes back to, when a show is already open.
     @Published var importReturn: Screen?
 
@@ -233,7 +235,7 @@ final class AppModel: ObservableObject {
     func refreshDevices() { devices = AudioDevices.all() }
 
     /// While a sheet is open, single-key shortcuts (Space, M, L, arrows) stay out of the way of typing.
-    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown || laneEdit != nil || typingInField || addAlbumShown }
+    var sheetOpen: Bool { issuesShown || outputShown || setlistEditorShown || goToShown || markerEdit != nil || showInfoShown || laneEdit != nil || typingInField || addAlbumShown || showInfoEntry != nil }
 
     static var showsFolder: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Vivid Playback")
@@ -488,6 +490,29 @@ final class AppModel: ObservableObject {
         refreshLibrary()
     }
 
+    /// Show Info for an album on the Albums page (the open show or another saved one).
+    func updateShowInfo(_ entry: ShowLibrary.Entry, artist: String, name: String) {
+        guard !locked else { return }
+        if entry.url.standardizedFileURL == packageURL?.standardizedFileURL {
+            updateShowInfo(artist: artist, name: name)
+            return
+        }
+        guard var target = try? ShowStore.load(from: entry.url) else { return }
+        let a = artist.trimmingCharacters(in: .whitespaces)
+        let n = name.trimmingCharacters(in: .whitespaces)
+        target.artist = a.isEmpty ? nil : a
+        if !n.isEmpty { target.name = n }
+        try? ShowStore.save(target, to: entry.url)
+        refreshLibrary()
+    }
+
+    /// Every artist in the library, for the artist pickers.
+    var knownArtists: [String] {
+        var entries = library
+        if let show, let packageURL { entries.append(ShowLibrary.Entry(url: packageURL, show: show)) }
+        return ShowLibrary.artists(in: entries)
+    }
+
     /// Every song in the setlist, in order, including the ones skipped tonight.
     var setlistSongs: [Song] {
         guard let show else { return [] }
@@ -587,18 +612,9 @@ final class AppModel: ObservableObject {
     func go(_ target: Screen) {
         guard show != nil || target == .firstRun, target != screen else { return }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        // Pages beside the sidebar swap quickly; the morphs into the timeline and clock take
-        // their time; reduced motion is a short crossfade.
-        let animation: Animation
-        if reduceMotion {
-            animation = .easeInOut(duration: 0.18)
-        } else if screen.hasSidebar && target.hasSidebar {
-            animation = .vivid(0.32)
-        } else if screen == .firstRun || target == .firstRun {
-            animation = .vivid(0.45)
-        } else {
-            animation = .vivid(0.55)
-        }
+        // The screens' own transitions set their timing (a quick fade out, then the new screen
+        // settles in); this covers everything else that changes with the screen.
+        let animation: Animation = reduceMotion ? .easeInOut(duration: 0.18) : .vivid(0.42)
         previousScreen = screen
         withAnimation(animation) { screen = target }
     }
@@ -1382,16 +1398,21 @@ final class AppModel: ObservableObject {
         return ShowLibrary.uniquePackageURL(named: show.name, in: Self.showsFolder)
     }
 
-    private func prepared(_ report: ImportReport) -> Show {
+    private func prepared(_ report: ImportReport, artist: String?, name: String?) -> Show {
         var show = report.show
+        if let artist {
+            let a = artist.trimmingCharacters(in: .whitespaces)
+            show.artist = a.isEmpty ? nil : a
+        }
+        if let n = name?.trimmingCharacters(in: .whitespaces), !n.isEmpty { show.name = n }
         // Start on this Mac's interface; Caiden picks the timecode output once.
         if show.routing.deviceUID == nil { show.routing.deviceUID = AudioDevices.defaultOutput()?.uid }
         return show
     }
 
     /// Adds an imported show to the Albums page without opening it (playback carries on).
-    func saveImported(_ report: ImportReport) {
-        let show = prepared(report)
+    func saveImported(_ report: ImportReport, artist: String? = nil, name: String? = nil) {
+        let show = prepared(report, artist: artist, name: name)
         let package = newPackage(for: show)
         do {
             try ShowStore.save(show, to: package)
@@ -1408,12 +1429,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Opens an imported show and saves it as a package in ~/Documents/Vivid Playback.
-    func openImported(_ report: ImportReport) {
+    func openImported(_ report: ImportReport, artist: String? = nil, name: String? = nil) {
         guard !transport.isPlaying || show == nil else {
             post("Stop playback before opening another show. You can add it to Albums now and open it later.")
             return
         }
-        let show = prepared(report)
+        let show = prepared(report, artist: artist, name: name)
         load(show, package: newPackage(for: show), issues: report.issues)
         save()
         importState = .idle

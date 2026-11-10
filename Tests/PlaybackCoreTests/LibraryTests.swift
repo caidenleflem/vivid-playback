@@ -97,4 +97,22 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(ShowLibrary.uniquePackageURL(named: "A/B: C", in: folder) { _ in false }.lastPathComponent, "A-B- C.vividshow")
         XCTAssertEqual(ShowLibrary.uniquePackageURL(named: "  ", in: folder) { _ in false }.lastPathComponent, "Show.vividshow")
     }
+
+    func testAlbumSearch() {
+        XCTAssertTrue(ShowLibrary.matches("", artist: nil, show: "Tour", setlist: "Full show"))
+        XCTAssertTrue(ShowLibrary.matches("beyonce", artist: "Beyoncé", show: "Renaissance", setlist: "Main"))
+        XCTAssertTrue(ShowLibrary.matches("main ren", artist: "Beyoncé", show: "Renaissance", setlist: "Main"))
+        XCTAssertFalse(ShowLibrary.matches("main festival", artist: "Beyoncé", show: "Renaissance", setlist: "Main"))
+        XCTAssertTrue(ShowLibrary.matches("  FULL  ", artist: nil, show: "Tour", setlist: "Full show"))
+    }
+
+    func testArtistsAreListedOnce() {
+        func entry(_ artist: String?) -> ShowLibrary.Entry {
+            var show = Show(name: "x")
+            show.artist = artist
+            return ShowLibrary.Entry(url: URL(fileURLWithPath: "/x"), show: show)
+        }
+        XCTAssertEqual(ShowLibrary.artists(in: [entry("Muse"), entry("arctic Monkeys"), entry("muse"), entry(nil), entry(" ")]),
+                       ["arctic Monkeys", "Muse"])
+    }
 }

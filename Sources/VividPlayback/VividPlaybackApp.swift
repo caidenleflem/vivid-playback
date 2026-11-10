@@ -158,47 +158,71 @@ struct RootView: View {
     @Namespace private var morph
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// A page arriving beside the sidebar rises a few points as it fades in; the one leaving just
-    /// fades. Coming back from the timeline, the morph does the work and the page only fades.
+    /// Screens swap whole, never piece by piece: the one leaving fades out quickly, then the one
+    /// arriving settles in with a slight zoom. Going deeper (library → timeline → clock) it comes
+    /// from a touch larger, as if you'd stepped in; coming back, from a touch smaller. Nothing
+    /// slides across anything else. Reduce Motion: a plain crossfade.
+    private static let leave = AnyTransition.opacity.animation(.easeOut(duration: 0.16))
+
+    private func depth(_ screen: Screen) -> Int {
+        switch screen {
+        case .firstRun: return -1
+        case .library, .albums, .connections: return 0
+        case .timeline: return 1
+        case .clock: return 2
+        }
+    }
+
+    private var screenTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity.animation(.easeInOut(duration: 0.18)) }
+        let deeper = depth(model.screen) >= depth(model.previousScreen)
+        let enter = AnyTransition.opacity.combined(with: .scale(scale: deeper ? 1.03 : 0.97))
+            .animation(.vivid(0.42).delay(0.05))
+        return .asymmetric(insertion: enter, removal: Self.leave)
+    }
+
+    /// Pages beside the sidebar: the new page rises a few points as it fades in.
     private var pageTransition: AnyTransition {
-        guard !reduceMotion, model.previousScreen.hasSidebar else { return .opacity }
-        return .asymmetric(insertion: .opacity.combined(with: .offset(y: 10)), removal: .opacity)
+        guard !reduceMotion else { return .opacity.animation(.easeInOut(duration: 0.18)) }
+        let enter = AnyTransition.opacity.combined(with: .offset(y: 10)).animation(.vivid(0.34).delay(0.03))
+        return .asymmetric(insertion: enter, removal: Self.leave)
     }
 
     var body: some View {
         ZStack(alignment: .top) {
-            if model.screen == .clock {
-                Color.black.ignoresSafeArea()
-            } else {
-                Ambient(song: model.screen == .firstRun ? nil : model.currentSong)
+            Group {
+                if model.screen == .clock {
+                    Color.black.ignoresSafeArea()
+                } else {
+                    Ambient(song: model.screen == .firstRun ? nil : model.currentSong)
+                }
             }
+            .transition(.opacity.animation(.easeInOut(duration: 0.3)))
             switch model.screen {
             case .firstRun:
-                FirstRunView().transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
+                FirstRunView().transition(screenTransition)
             case .clock:
-                ClockScreen(morph: morph).transition(.opacity)
+                ClockScreen(morph: morph).transition(screenTransition)
+            case .timeline:
+                SongTimelineView(morph: morph).transition(screenTransition)
             default:
                 // One sidebar for Albums, Now playing and Connections: it stays put while the page
-                // beside it changes, and slides away for the timeline.
+                // beside it changes. The timeline and the clock replace the whole window.
                 HStack(spacing: 0) {
-                    if model.screen.hasSidebar {
-                        Sidebar()
-                            .frame(width: 224)
-                            .padding(10)
-                            .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
-                    }
+                    Sidebar()
+                        .frame(width: 224)
+                        .padding(10)
                     ZStack {
                         switch model.screen {
                         case .library: LibraryView(morph: morph).transition(pageTransition)
                         case .albums: AlbumsView().transition(pageTransition)
                         case .connections: ConnectionsView().transition(pageTransition)
-                        case .timeline: SongTimelineView(morph: morph)
                         default: EmptyView()
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .transition(.opacity)
+                .transition(screenTransition)
             }
             if let notice = model.notice, model.screen != .firstRun {
                 VStack {
@@ -244,6 +268,7 @@ struct RootView: View {
         .sheet(isPresented: $model.goToShown) { GoToSheet().environmentObject(model) }
         .sheet(isPresented: $model.showInfoShown) { ShowInfoSheet().environmentObject(model) }
         .sheet(isPresented: $model.addAlbumShown) { AddAlbumSheet().environmentObject(model) }
+        .sheet(item: $model.showInfoEntry) { entry in ShowInfoSheet(entry: entry).environmentObject(model) }
         .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song).environmentObject(model) }
         .sheet(item: $model.laneEdit) { lane in LaneEditor(lane: lane).environmentObject(model).environmentObject(model.control) }
     }

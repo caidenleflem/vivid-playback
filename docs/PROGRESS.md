@@ -328,3 +328,18 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   0.55 s; first run 0.45 s with a slight scale; Reduce Motion is a 0.18 s crossfade with no
   movement. Moving to the screen you're on does nothing (no re-animation).
 - 95 tests pass.
+
+## 2026-11-10: artists, album search, screen transitions
+
+- Import results (first run and Add album) have Artist (type or pick from the library's artists)
+  and Show name fields, applied before the show is saved. Show Info… on any album edits artist and
+  name for the open show or any saved one.
+- Albums search (⌘F): every word must appear in the artist, show or setlist name, case and accent
+  insensitive (`ShowLibrary.matches`, tested); empty result state with Clear.
+- Transitions between Now playing, Timeline and Clock: no more matched-geometry flights (title,
+  clock, artwork and bar flew across the other screen's contents). Screens now swap whole: the
+  old one fades out in 0.16 s, the new one fades in with a 3% zoom (from larger going deeper, from
+  smaller coming back), critically damped 0.42 s after a 0.05 s beat. The sidebar shell is one
+  unit, so nothing reflows mid-transition. The timeline's draw-in wipe is gone. Reduce Motion: a
+  0.18 s crossfade.
+- 97 tests pass.

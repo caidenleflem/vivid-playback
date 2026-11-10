@@ -44,6 +44,9 @@ struct ImportFlow: View {
     let mode: Mode
     @EnvironmentObject private var model: AppModel
     @State private var targeted = false
+    /// Who and what the imported show is called (editable before it's saved).
+    @State private var artist = ""
+    @State private var showName = ""
 
     var body: some View {
         VStack(spacing: 18) {
@@ -202,20 +205,35 @@ struct ImportFlow: View {
             }
             .frame(maxHeight: 360)
             Text(summary(report)).font(.manrope(14)).foregroundStyle(Brand.steel)
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow {
+                    Text("Artist").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel)
+                    ArtistField(text: $artist, artists: model.knownArtists)
+                }
+                GridRow {
+                    Text("Show").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel)
+                    TextField("Show name", text: $showName).textFieldStyle(.roundedBorder).font(.manrope(14))
+                }
+            }
+            .frame(maxWidth: 420)
+            .onAppear {
+                artist = report.show.artist ?? ""
+                showName = report.show.name
+            }
             HStack(spacing: 10) {
                 Button("Start over") { model.importState = .idle }
                     .buttonStyle(QuietButtonStyle())
                 if mode == .addAlbum {
                     Spacer(minLength: 0)
-                    Button("Add and open") { model.openImported(report) }
+                    Button("Add and open") { model.openImported(report, artist: artist, name: showName) }
                         .buttonStyle(QuietButtonStyle())
                         .disabled(model.transport.isPlaying)
                         .help(model.transport.isPlaying ? "Stop playback to open it now. Add it, and open it from Albums later." : "Add it to Albums and open it")
-                    Button("Add to Albums") { model.saveImported(report) }
+                    Button("Add to Albums") { model.saveImported(report, artist: artist, name: showName) }
                         .buttonStyle(QuietButtonStyle(prominent: true))
                         .keyboardShortcut(.defaultAction)
                 } else {
-                    Button("Open show") { model.openImported(report) }
+                    Button("Open show") { model.openImported(report, artist: artist, name: showName) }
                         .buttonStyle(QuietButtonStyle(prominent: true))
                         .keyboardShortcut(.defaultAction)
                 }

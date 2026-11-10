@@ -165,12 +165,10 @@ struct ClockScreen: View {
                 VStack(spacing: 20) {
                     StateChips()
                     LiveClock(size: min(230, (geo.size.width - 96) / 5.7), weight: .light)
-                        .matchedGeometryEffect(id: "clock", in: morph)
                     if let song = model.currentSong {
                         Text(song.title)
                             .font(.manrope(30, .semibold))
                             .foregroundStyle(Brand.ink)
-                            .matchedGeometryEffect(id: "title", in: morph)
                         SongProgress { position, length in
                             Text(nextLine(position: position, length: length))
                                 .font(.manrope(16).monospacedDigit())

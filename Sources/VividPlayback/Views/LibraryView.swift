@@ -36,7 +36,6 @@ struct LibraryView: View {
                     .padding(.top, 18)
                     .padding(.bottom, 14)
                 SongList()
-                    .transition(.opacity.combined(with: .offset(y: 40)))
                     .dropDestination(for: URL.self) { urls, _ in
                         guard !model.locked else { return false }
                         model.addAudio(urls)
@@ -245,10 +244,8 @@ struct PlayerBar: View {
                 HStack(spacing: 12) {
                     SongArt(song: song, cornerRadius: 6)
                         .frame(width: 38, height: 38)
-                        .matchedGeometryEffect(id: "art", in: morph)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(song.title).font(.manrope(13, .semibold)).foregroundStyle(Brand.ink)
-                            .matchedGeometryEffect(id: "title", in: morph)
                         SongProgress { position, length in
                             VStack(spacing: 3) {
                                 GeometryReader { geo in
@@ -288,7 +285,6 @@ struct PlayerBar: View {
         .padding(.horizontal, 14)
         .frame(height: 58)
         .glass(cornerRadius: 16, alpha: 0.76)
-        .matchedGeometryEffect(id: "bar", in: morph)
     }
 }
 
@@ -312,7 +308,6 @@ struct ClockHero: View {
             }
             GeometryReader { geo in
                 LiveClock(size: min(150, geo.size.width / 6.2), weight: .light, songTime: !model.showsShowTimecode)
-                    .matchedGeometryEffect(id: "clock", in: morph)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
             .frame(height: 160)

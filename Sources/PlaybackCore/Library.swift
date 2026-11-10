@@ -112,6 +112,25 @@ public enum ShowLibrary {
             .sorted { ($0.show.artist ?? $0.show.name).localizedStandardCompare($1.show.artist ?? $1.show.name) == .orderedAscending }
     }
 
+    /// Albums search: every word typed must appear in the artist, the show or the setlist name
+    /// (any order, ignoring case and accents). An empty search matches everything.
+    public static func matches(_ query: String, artist: String?, show: String, setlist: String) -> Bool {
+        let words = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !words.isEmpty else { return true }
+        let haystack = [artist ?? "", show, setlist].joined(separator: " ")
+        return words.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
+    /// The artists in the library, each once, sorted.
+    public static func artists(in entries: [Entry]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for a in entries.compactMap({ $0.show.artist?.trimmingCharacters(in: .whitespaces) }) where !a.isEmpty {
+            if seen.insert(a.lowercased()).inserted { out.append(a) }
+        }
+        return out.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     /// Where a new show called `name` can be saved in `folder` without replacing one already
     /// there: "Name.vividshow", then "Name 2.vividshow", "Name 3.vividshow"…
     public static func uniquePackageURL(named name: String, in folder: URL,

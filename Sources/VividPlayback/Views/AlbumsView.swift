@@ -29,6 +29,8 @@ struct AlbumsView: View {
     @State private var dropTarget: UUID?
     /// The album waiting for Delete to be confirmed.
     @State private var pendingDelete: (entry: ShowLibrary.Entry, setlist: Setlist)?
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
             ScrollView {
@@ -47,6 +49,16 @@ struct AlbumsView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 80)
                     }
+                    if !entries.isEmpty && groups.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass").font(.system(size: 30, weight: .light)).foregroundStyle(Brand.graphite)
+                            Text("No albums match “\(query.trimmingCharacters(in: .whitespaces))”").font(.manrope(16, .semibold)).foregroundStyle(Brand.ink)
+                            Text("Search looks at artists, shows and setlists.").font(.manrope(13)).foregroundStyle(Brand.space)
+                            Button("Clear search") { query = "" }.buttonStyle(QuietButtonStyle())
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 70)
+                    }
                     ForEach(groups, id: \.artist) { group in
                         VStack(alignment: .leading, spacing: 14) {
                             Text(group.artist).font(.manrope(20, .semibold)).foregroundStyle(Brand.ink)
@@ -56,7 +68,7 @@ struct AlbumsView: View {
                                     card(album.entry, album.setlist)
                                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                                 }
-                                if group.artist == groups.last?.artist { addCard }
+                                if group.artist == groups.last?.artist && query.isEmpty { addCard }
                             }
                         }
                     }
@@ -80,9 +92,10 @@ struct AlbumsView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text("Albums").font(.manrope(34, .bold)).foregroundStyle(Brand.ink)
             Spacer()
+            if !entries.isEmpty { searchField }
             Button { model.addAlbum() } label: {
                 HStack(spacing: 7) {
                     Image(systemName: "plus").font(.system(size: 12, weight: .bold))
@@ -94,6 +107,33 @@ struct AlbumsView: View {
             .help("Import a show folder, open a show file, or try the example")
         }
         .padding(.top, 70)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .semibold)).foregroundStyle(Brand.space)
+            TextField("Search artists and albums", text: $query)
+                .textFieldStyle(.plain)
+                .font(.manrope(13))
+                .foregroundStyle(Brand.ink)
+                .focused($searchFocused)
+                .onChange(of: searchFocused) { model.typingInField = $0 }
+                .onExitCommand { query = ""; searchFocused = false }
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 12)).foregroundStyle(Brand.graphite)
+                }
+                .buttonStyle(.plain)
+                .help("Clear")
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(width: 250, height: 32)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.white.opacity(searchFocused ? 0.09 : 0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Brand.gold.opacity(searchFocused ? 0.5 : 0), lineWidth: 1))
+        .background(Button("") { searchFocused = true }.keyboardShortcut("f").opacity(0).allowsHitTesting(false))
+        .onDisappear { if searchFocused { model.typingInField = false } }
+        .help("Search (⌘F)")
     }
 
     /// The dashed "add" tile at the end of the grid.
@@ -154,8 +194,11 @@ struct AlbumsView: View {
         var byArtist: [String: [(entry: ShowLibrary.Entry, setlist: Setlist)]] = [:]
         for entry in entries {
             let artist = entry.show.artist ?? "No artist"
-            if byArtist[artist] == nil { order.append(artist) }
-            for list in entry.show.setlists { byArtist[artist, default: []].append((entry, list)) }
+            for list in entry.show.setlists
+            where ShowLibrary.matches(query, artist: entry.show.artist, show: entry.show.name, setlist: list.name) {
+                if byArtist[artist] == nil { order.append(artist) }
+                byArtist[artist, default: []].append((entry, list))
+            }
         }
         return order.map { ($0, byArtist[$0] ?? []) }
     }
@@ -186,6 +229,7 @@ struct AlbumsView: View {
             Button("Open") { model.openAlbum(entry, setlistID: list.id) }
             Button("Choose Cover…") { model.chooseArtwork(for: list.id, in: entry) }.disabled(model.locked)
             if list.artwork != nil { Button("Remove Cover") { model.setArtwork(nil, for: list.id, in: entry) }.disabled(model.locked) }
+            Button("Show Info…") { model.showInfoEntry = entry }.disabled(model.locked)
             Divider()
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) }
             Button(entry.show.setlists.count > 1 ? "Delete Album…" : "Delete Show…", role: .destructive) {
@@ -197,29 +241,65 @@ struct AlbumsView: View {
     }
 }
 
+/// An artist: type a new one, or pick one already in the library.
+struct ArtistField: View {
+    @Binding var text: String
+    let artists: [String]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Artist", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .font(.manrope(14))
+            if !artists.isEmpty {
+                Menu {
+                    ForEach(artists, id: \.self) { a in Button(a) { text = a } }
+                    if !text.isEmpty {
+                        Divider()
+                        Button("No artist") { text = "" }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("An artist already in Albums")
+            }
+        }
+    }
+}
+
+/// Artist and show name, for the open show or any saved one.
 struct ShowInfoSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    /// nil: the open show.
+    var entry: ShowLibrary.Entry? = nil
     @State private var artist = ""
     @State private var name = ""
 
     var body: some View {
-        SheetFrame(title: "Show info", subtitle: "Shows are grouped by artist on the Albums page.", width: 460) {
+        SheetFrame(title: "Show info", subtitle: "Albums are grouped by artist.", width: 460) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Artist").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel)
-                TextField("Artist", text: $artist).textFieldStyle(.roundedBorder).font(.manrope(14))
+                ArtistField(text: $artist, artists: model.knownArtists)
                 Text("Show").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel)
                 TextField("Show name", text: $name).textFieldStyle(.roundedBorder).font(.manrope(14))
                 HStack {
                     Spacer()
-                    Button("Save") { model.updateShowInfo(artist: artist, name: name); dismiss() }
-                        .buttonStyle(QuietButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
+                    Button("Save") {
+                        if let entry { model.updateShowInfo(entry, artist: artist, name: name) } else { model.updateShowInfo(artist: artist, name: name) }
+                        dismiss()
+                    }
+                    .buttonStyle(QuietButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
                 }
             }
         }
         .onAppear {
-            artist = model.show?.artist ?? ""
-            name = model.show?.name ?? ""
+            let show = entry?.show ?? model.show
+            artist = show?.artist ?? ""
+            name = show?.name ?? ""
         }
     }
 }

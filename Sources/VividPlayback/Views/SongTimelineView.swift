@@ -23,7 +23,6 @@ struct SongTimelineView: View {
                 TimelinePanel(song: song)
                     .padding(.horizontal, 40)
                     .padding(.bottom, 28)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
     }
@@ -33,7 +32,6 @@ struct SongTimelineView: View {
             Color.clear.frame(width: 64, height: 1)  // room for the window buttons
             TransportButtons()
             LiveClock(size: 30, weight: .light)
-                .matchedGeometryEffect(id: "clock", in: morph)
             if let song = model.currentSong { Chip(song.rate.displayName) }
             if transport.isLoading { ProgressView().controlSize(.small) }
             Spacer()
@@ -70,7 +68,6 @@ struct SongTimelineView: View {
         .padding(.horizontal, 14)
         .frame(height: 58)
         .glass(cornerRadius: 16, alpha: 0.76)
-        .matchedGeometryEffect(id: "bar", in: morph)
     }
 
     private func header(_ song: Song) -> some View {
@@ -78,7 +75,6 @@ struct SongTimelineView: View {
             SongArt(song: song, cornerRadius: 12)
                 .frame(width: 160, height: 160)
                 .shadow(color: .black.opacity(0.5), radius: 25, y: 20)
-                .matchedGeometryEffect(id: "art", in: morph)
             VStack(alignment: .leading, spacing: 8) {
                 let q = model.queue
                 let index = (q.firstIndex { $0.id == song.id } ?? 0) + 1
@@ -86,7 +82,6 @@ struct SongTimelineView: View {
                 Text(song.title)
                     .font(.manrope(44, .semibold))
                     .foregroundStyle(Brand.ink)
-                    .matchedGeometryEffect(id: "title", in: morph)
                 HStack(spacing: 8) {
                     if song.hasTimecode {
                         Chip(song.end.map { "\(song.start) → \($0)" } ?? song.start.description).monospacedDigit()
@@ -161,7 +156,8 @@ struct TimelinePanel: View {
     @EnvironmentObject private var transport: Transport
     @EnvironmentObject private var control: ControlCenter
     let song: Song
-    @State private var reveal: CGFloat = 0
+    /// The whole timeline arrives with the screen; nothing draws in separately.
+    @State private var reveal: CGFloat = 1
     /// A trigger being dragged along its lane, and how far.
     @State private var dragging: (id: UUID, dx: CGFloat)?
     /// A selection box being dragged across the lanes, in the tracks' coordinates.
@@ -292,7 +288,7 @@ struct TimelinePanel: View {
         .animation(.vivid(0.4), value: lanes)
         .onAppear {
             model.loadWaveform(for: song)
-            if reduceMotion { reveal = 1 } else { withAnimation(.vivid(0.7).delay(0.12)) { reveal = 1 } }
+            reveal = 1
         }
     }
 
