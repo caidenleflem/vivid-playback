@@ -288,3 +288,15 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 - Settings saved by older versions now load (missing fields take defaults). The previous build
   could reset this Mac's Connections settings once on upgrade.
 - 92 tests pass.
+
+## 2026-11-10: box select, multi-delete, marker undo
+
+- Selection is now a set. Drag from empty space on the marker/executor lanes draws a box and
+  selects what's inside, live (⇧ adds to the selection). ⇧/⌘-click toggles one; ⌘A all; Esc clears.
+  Starting a drag on a marker or its label moves it instead (hit test on the row and label width).
+- A floating selection bar (solid, not glass) shows the count with nudge, Delete and clear.
+  Right-click on a selected item offers Delete N Selected. Delete shows a notice with Undo.
+- Dragging a selected item moves the whole selection by whole frames, spacing kept.
+- ⌘Z / ⇧⌘Z: snapshot undo of a song's markers for every marker edit (add, key-in, rename,
+  move, nudge, level, delete), up to 100 steps; handled in the timeline only, so text fields and
+  other screens keep the system Undo.

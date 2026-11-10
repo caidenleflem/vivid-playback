@@ -66,6 +66,13 @@ Two-finger swipe or the bar under the ruler moves along; while playing it pages 
 playhead. Click a marker or trigger to select it, drag it to move it (it lands on a whole
 frame), **⌥← ⌥→** nudge it a frame (**⇧** for ten), **Delete** removes it.
 
+**Selecting several:** drag a box across the lanes from empty space to select every marker and
+trigger inside it (hold **⇧** to add to what's selected). **⇧-click** or **⌘-click** adds or
+removes one; **⌘A** selects them all; **Esc** clears. A bar at the bottom shows what's selected,
+with nudge and **Delete**. Dragging a selected trigger moves the whole selection, keeping the
+spacing. **⌘Z** undoes any marker or trigger change (adding, keying in, moving, deleting);
+**⇧⌘Z** redoes.
+
 Triggers fire over OSC on time with the music you hear (the same clock as the timecode), and
 flash gold as they go. Lanes belong to the show; each song has its own triggers.
 

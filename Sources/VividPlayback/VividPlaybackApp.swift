@@ -179,6 +179,8 @@ struct RootView: View {
                             .multilineTextAlignment(.center)
                         if model.noticeOffersUndo && model.lastFix != nil {
                             Button("Undo") { model.undoFix() }.buttonStyle(QuietButtonStyle())
+                        } else if model.noticeOffersMarkerUndo && model.canUndoMarkers {
+                            Button("Undo") { model.undoMarkers() }.buttonStyle(QuietButtonStyle())
                         }
                     }
                         .padding(.horizontal, 18)

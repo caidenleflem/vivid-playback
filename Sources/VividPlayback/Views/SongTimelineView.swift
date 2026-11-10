@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import QuartzCore
 import PlaybackCore
 
@@ -163,6 +164,8 @@ struct TimelinePanel: View {
     @State private var reveal: CGFloat = 0
     /// A trigger being dragged along its lane, and how far.
     @State private var dragging: (id: UUID, dx: CGFloat)?
+    /// A selection box being dragged across the lanes, in the tracks' coordinates.
+    @State private var marquee: (start: CGPoint, end: CGPoint, base: Set<UUID>)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var lanes: [TriggerLane] { model.lanes }
@@ -243,6 +246,7 @@ struct TimelinePanel: View {
                             playhead(position: position, height: linesBottom - 18)
                                 .offset(x: labelWidth + 12 + playheadX - 1)
                         }
+                        marqueeBox
                       }
                     }
                     .contentShape(Rectangle())
@@ -252,6 +256,7 @@ struct TimelinePanel: View {
                         guard x >= 0, trackWidth > 0, value.startLocation.y < scrubLimit else { return }
                         transport.locate(win.time(atX: Double(min(x, trackWidth)), width: Double(trackWidth)))
                     })
+                    .simultaneousGesture(marqueeGesture(scrubLimit: scrubLimit, laneHeight: laneHeight, width: trackWidth, win: win))
                     .onAppear { reportTrackFrame(geo, trackWidth: trackWidth) }
                     .onChange(of: geo.frame(in: .global)) { _ in reportTrackFrame(geo, trackWidth: trackWidth) }
                 }
@@ -273,6 +278,8 @@ struct TimelinePanel: View {
         .padding(.bottom, 16)
         .frame(maxHeight: .infinity, alignment: .top)
         .solidPanel()
+        .overlay(alignment: .bottom) { selectionBar.padding(.bottom, 12) }
+        .animation(.vivid(0.3), value: model.selectedMarkerIDs.isEmpty)
         .animation(.vivid(0.4), value: lanes)
         .onAppear {
             model.loadWaveform(for: song)
@@ -416,8 +423,7 @@ struct TimelinePanel: View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 8).fill(Brand.gold.opacity(0.05))
             ForEach(markers) { marker in
-                let dx = dragging?.id == marker.id ? dragging?.dx ?? 0 : 0
-                let x = xPos(of: marker, width: width, win: win) + dx
+                let x = xPos(of: marker, width: width, win: win) + dragOffset(marker.id)
                 if x > -200 && x < width + 200 {
                     let flip = x > width * 0.85
                     HStack(spacing: 7) {
@@ -444,14 +450,12 @@ struct TimelinePanel: View {
     }
 
     private func markerChip(_ marker: Marker, width: CGFloat, win: TimelineWindow) -> some View {
-        markerLabel(marker.label, selected: model.selectedMarkerID == marker.id)
+        markerLabel(marker.label, selected: model.selectedMarkerIDs.contains(marker.id))
             .contentShape(Rectangle())
-            .onTapGesture {
-                model.selectedMarkerID = marker.id
-                transport.locate(model.seconds(of: marker, in: song))
-            }
+            .onTapGesture { click(marker) }
             .gesture(moveGesture(marker, width: width, win: win))
             .contextMenu {
+                selectionMenu(marker)
                 Button("Go to Marker") { transport.locate(model.seconds(of: marker, in: song)) }
                 Button("Rename…") { model.markerEdit = MarkerEdit(marker: marker, song: song) }.disabled(model.locked)
                 Button("Move to Playhead") { model.moveToPlayhead(marker, in: song) }.disabled(model.locked)
@@ -460,22 +464,181 @@ struct TimelinePanel: View {
                 Divider()
                 Button("Delete") { model.deleteMarker(marker, in: song) }.disabled(model.locked)
             }
-            .help("Click to select and go here. Drag to move; ⌥← ⌥→ nudge a frame; Delete removes it.")
+            .help("Click to select and go here; shift-click to add to the selection. Drag to move; ⌥← ⌥→ nudge a frame; Delete removes it.")
     }
 
-    /// Drag a marker or trigger along its lane; it lands on a whole frame.
+    /// Click selects one and goes there; shift- or ⌘-click adds it to (or takes it off) the selection.
+    private func click(_ m: Marker) {
+        let mods = NSEvent.modifierFlags
+        if mods.contains(.shift) || mods.contains(.command) {
+            model.toggleSelection(m)
+        } else {
+            model.selectedMarkerID = m.id
+            transport.locate(model.seconds(of: m, in: song))
+        }
+    }
+
+    /// With several selected, right-click offers to act on all of them.
+    @ViewBuilder private func selectionMenu(_ m: Marker) -> some View {
+        let n = model.selectedMarkerIDs.count
+        if n > 1 && model.selectedMarkerIDs.contains(m.id) {
+            Button("Delete \(n) Selected") { model.deleteSelected() }.disabled(model.locked)
+            Button("Move \(n) Selected One Frame Earlier") { model.nudgeSelected(frames: -1) }.disabled(model.locked)
+            Button("Move \(n) Selected One Frame Later") { model.nudgeSelected(frames: 1) }.disabled(model.locked)
+            Divider()
+        }
+    }
+
+    /// How far a marker is being dragged: dragging a selected one carries the whole selection.
+    private func dragOffset(_ id: UUID) -> CGFloat {
+        guard let d = dragging else { return 0 }
+        if d.id == id { return d.dx }
+        let sel = model.selectedMarkerIDs
+        return sel.count > 1 && sel.contains(d.id) && sel.contains(id) ? d.dx : 0
+    }
+
+    /// Drag a marker or trigger along its lane (with the rest of the selection, if it's in it);
+    /// it lands on a whole frame.
     private func moveGesture(_ m: Marker, width: CGFloat, win: TimelineWindow) -> some Gesture {
         DragGesture(minimumDistance: 3)
             .onChanged { v in
                 guard !model.locked else { return }
-                model.selectedMarkerID = m.id
+                if !model.selectedMarkerIDs.contains(m.id) { model.selectedMarkerID = m.id }
                 dragging = (m.id, v.translation.width)
             }
             .onEnded { v in
                 dragging = nil
                 guard !model.locked, width > 0 else { return }
-                model.move(m, in: song, to: model.seconds(of: m, in: song) + Double(v.translation.width / width) * win.span)
+                let seconds = Double(v.translation.width / width) * win.span
+                if model.selectedMarkerIDs.count > 1 && model.selectedMarkerIDs.contains(m.id) {
+                    model.moveSelected(by: seconds)
+                } else {
+                    model.move(m, in: song, to: model.seconds(of: m, in: song) + seconds)
+                }
             }
+    }
+
+    // MARK: Box selection
+
+    /// The rows markers sit on, top to bottom, in the tracks' coordinates: the marker lane
+    /// (laneID nil) and each executor lane.
+    private func markerRows(scrubLimit: CGFloat, laneHeight: CGFloat) -> [(laneID: UUID?, top: CGFloat, height: CGFloat)] {
+        var result: [(laneID: UUID?, top: CGFloat, height: CGFloat)] = []
+        var y = scrubLimit + 10
+        if !plainMarkers.isEmpty {
+            result.append((laneID: nil, top: y, height: 44))
+            y += 54
+        }
+        for l in lanes {
+            result.append((laneID: l.id, top: y, height: laneHeight))
+            y += laneHeight + 6
+        }
+        return result
+    }
+
+    /// True when a point lands on a marker or its label (that drag moves it instead of drawing a box).
+    private func hitsMarker(_ p: CGPoint, rows: [(laneID: UUID?, top: CGFloat, height: CGFloat)], width: CGFloat, win: TimelineWindow) -> Bool {
+        guard let row = rows.first(where: { p.y >= $0.top && p.y <= $0.top + $0.height }) else { return false }
+        for m in song.markers where m.laneID == row.laneID {
+            let x = labelWidth + 12 + xPos(of: m, width: width, win: win)
+            let label = CGFloat(m.label.count) * (row.laneID == nil ? 6.8 : 6.4) + 22
+            let flip = x - labelWidth - 12 > width * (row.laneID == nil ? 0.85 : 0.88)
+            let lo = flip ? x - label : x - 5, hi = flip ? x + 5 : x + label
+            if p.x >= lo && p.x <= hi { return true }
+        }
+        return false
+    }
+
+    private func marqueeGesture(scrubLimit: CGFloat, laneHeight: CGFloat, width: CGFloat, win: TimelineWindow) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { v in
+                let rows = markerRows(scrubLimit: scrubLimit, laneHeight: laneHeight)
+                if marquee == nil {
+                    // Only from empty space on the marker and executor lanes.
+                    guard dragging == nil, !rows.isEmpty, v.startLocation.y >= scrubLimit + 4,
+                          v.startLocation.x >= labelWidth + 12,
+                          !hitsMarker(v.startLocation, rows: rows, width: width, win: win) else { return }
+                    let mods = NSEvent.modifierFlags
+                    marquee = (start: v.startLocation, end: v.location, base: mods.contains(.shift) || mods.contains(.command) ? model.selectedMarkerIDs : [])
+                }
+                guard var box = marquee else { return }
+                box.end = v.location
+                marquee = box
+                let rect = CGRect(x: min(box.start.x, box.end.x), y: min(box.start.y, box.end.y),
+                                  width: abs(box.end.x - box.start.x), height: abs(box.end.y - box.start.y))
+                var picked = box.base
+                for row in rows where row.top + row.height >= rect.minY && row.top <= rect.maxY {
+                    for m in song.markers where m.laneID == row.laneID {
+                        let x = labelWidth + 12 + xPos(of: m, width: width, win: win)
+                        if x >= rect.minX && x <= rect.maxX { picked.insert(m.id) }
+                    }
+                }
+                if picked != model.selectedMarkerIDs { model.selectedMarkerIDs = picked }
+            }
+            .onEnded { _ in marquee = nil }
+    }
+
+    @ViewBuilder private var marqueeBox: some View {
+        if let box = marquee {
+            let rect = CGRect(x: min(box.start.x, box.end.x), y: min(box.start.y, box.end.y),
+                              width: abs(box.end.x - box.start.x), height: abs(box.end.y - box.start.y))
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Brand.gold.opacity(0.10))
+                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Brand.gold.opacity(0.75), lineWidth: 1))
+                .frame(width: rect.width, height: rect.height)
+                .offset(x: rect.minX, y: rect.minY)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// What's selected, and what you can do with it, floating over the bottom of the timeline.
+    @ViewBuilder private var selectionBar: some View {
+        let selected = model.selectedMarkers
+        if !selected.isEmpty {
+            let triggers = selected.filter { $0.laneID != nil }.count
+            let markers = selected.count - triggers
+            let what = [triggers > 0 ? "\(triggers) trigger\(triggers == 1 ? "" : "s")" : nil,
+                        markers > 0 ? "\(markers) marker\(markers == 1 ? "" : "s")" : nil].compactMap { $0 }.joined(separator: ", ")
+            HStack(spacing: 6) {
+                Text(what + " selected").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.ink)
+                    .padding(.leading, 6).padding(.trailing, 8)
+                barButton("chevron.left", "One frame earlier (⌥←)") { model.nudgeSelected(frames: -1) }
+                barButton("chevron.right", "One frame later (⌥→)") { model.nudgeSelected(frames: 1) }
+                Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 18).padding(.horizontal, 4)
+                Button { model.deleteSelected() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash").font(.system(size: 11.5, weight: .semibold))
+                        Text("Delete").font(.manrope(12.5, .semibold))
+                        KeyCap(key: "⌫")
+                    }
+                    .foregroundStyle(Color(hex: 0xF0A096))
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(Color(hex: 0xE5675A).opacity(0.14)))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(model.locked)
+                .help("Delete what's selected. ⌘Z brings it back.")
+                barButton("xmark", "Clear the selection (Esc)") { model.selectedMarkerIDs = [] }
+            }
+            .padding(5)
+            .background(Capsule().fill(Brand.phantom))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.1), lineWidth: 1))
+            .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+            .transition(.opacity.combined(with: .offset(y: 8)))
+        }
+    }
+
+    private func barButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Brand.steel)
+                .frame(width: 28, height: 26)
+                .background(Circle().fill(.white.opacity(0.06)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.locked && symbol != "xmark")
+        .help(help)
     }
 
     // MARK: Executor lanes
@@ -523,8 +686,11 @@ struct TimelinePanel: View {
             .gesture(SpatialTapGesture(count: 2).onEnded { value in
                 model.addTrigger(on: lane, at: win.time(atX: Double(value.location.x), width: Double(width)))
             })
-            .simultaneousGesture(TapGesture().onEnded { model.selectedLaneID = lane.id; model.selectedMarkerID = nil })
-            .help("Double-click to drop a trigger here. Press C to drop one at the playhead.")
+            .simultaneousGesture(TapGesture().onEnded {
+                model.selectedLaneID = lane.id
+                if !NSEvent.modifierFlags.contains(.shift) { model.selectedMarkerIDs = [] }
+            })
+            .help("Drag across lanes to select triggers. Double-click to drop one here; C drops one at the playhead.")
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(lane.title) lane, \(triggers.count) triggers")
@@ -585,9 +751,9 @@ struct TimelinePanel: View {
     private func triggerTick(_ m: Marker, lane: TriggerLane, color: Color, height: CGFloat, width: CGFloat, win: TimelineWindow,
                              room: CGFloat) -> some View {
         let fired = control.firedAt[m.id].map { Date().timeIntervalSince($0) < 0.35 } ?? false
-        let dx = dragging?.id == m.id ? dragging?.dx ?? 0 : 0
+        let dx = dragOffset(m.id)
         let x = xPos(of: m, width: width, win: win) + dx
-        let selected = model.selectedMarkerID == m.id
+        let selected = model.selectedMarkerIDs.contains(m.id)
         let flip = x > width * 0.88
         let text = triggerText(m, lane: lane)
         // Labels that would run into the next trigger are left off (hover shows them).
@@ -612,11 +778,11 @@ struct TimelinePanel: View {
         .contentShape(Rectangle())
         .onTapGesture {
             model.selectedLaneID = lane.id
-            model.selectedMarkerID = m.id
-            transport.locate(model.seconds(of: m, in: song))
+            click(m)
         }
         .gesture(moveGesture(m, width: width, win: win))
         .contextMenu {
+            selectionMenu(m)
             Button("Go to Trigger") { transport.locate(model.seconds(of: m, in: song)) }
             Button("Fire Now") { model.fire(m) }
             Divider()

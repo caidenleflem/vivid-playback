@@ -121,13 +121,23 @@ final class AppModel: ObservableObject {
         didSet {
             syncTriggers()
             if currentSongID != oldValue {
-                selectedMarkerID = nil
+                selectedMarkerIDs = []
                 timelineWindow = TimelineWindow(length: currentSong?.length ?? 1)
             }
         }
     }
-    /// The marker or trigger picked in the timeline (Delete removes it, ⌥← ⌥→ nudge it).
-    @Published var selectedMarkerID: UUID?
+    /// The markers and triggers picked in the timeline (Delete removes them, ⌥← ⌥→ nudge them).
+    @Published var selectedMarkerIDs: Set<UUID> = []
+    /// One selected marker (setting it selects just that one).
+    var selectedMarkerID: UUID? {
+        get { selectedMarkerIDs.count == 1 ? selectedMarkerIDs.first : nil }
+        set { selectedMarkerIDs = newValue.map { [$0] } ?? [] }
+    }
+    /// Marker edits that ⌘Z can take back: the song's markers before each change.
+    private var markerUndo: [(songID: UUID, markers: [Marker])] = []
+    private var markerRedo: [(songID: UUID, markers: [Marker])] = []
+    /// The notice's Undo button takes back a marker change.
+    @Published var noticeOffersMarkerUndo = false
     /// How far the timeline is zoomed in, and where.
     @Published var timelineWindow = TimelineWindow(length: 1)
     /// Where the timeline's tracks sit in the window (top-left coordinates), for trackpad zoom.
@@ -442,6 +452,7 @@ final class AppModel: ObservableObject {
 
     func addMarker(remote: Bool = false) {
         guard screen == .timeline || remote, let song = currentSong else { return }
+        rememberMarkers(of: song)
         let tc = timecode(for: song, at: transport.position())
         withAnimation(.vivid(0.45)) {
             edit { show in
@@ -457,6 +468,7 @@ final class AppModel: ObservableObject {
     func renameMarker(_ marker: Marker, in song: Song, to label: String) {
         let text = label.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
+        rememberMarkers(of: song)
         edit { show in
             guard let s = show.songs.firstIndex(where: { $0.id == song.id }),
                   let m = show.songs[s].markers.firstIndex(where: { $0.id == marker.id }) else { return }
@@ -465,13 +477,14 @@ final class AppModel: ObservableObject {
     }
 
     func deleteMarker(_ marker: Marker, in song: Song) {
+        rememberMarkers(of: song)
         withAnimation(.vivid(0.4)) {
             edit { show in
                 guard let s = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
                 show.songs[s].markers.removeAll { $0.id == marker.id }
             }
         }
-        if selectedMarkerID == marker.id { selectedMarkerID = nil }
+        selectedMarkerIDs.remove(marker.id)
     }
 
     func seconds(of marker: Marker, in song: Song) -> Double {
@@ -619,6 +632,7 @@ final class AppModel: ObservableObject {
     func addTrigger(on target: TriggerLane? = nil, at seconds: Double? = nil) -> Marker? {
         guard screen == .timeline, !locked, let song = currentSong else { return nil }
         guard let lane = target ?? selectedLane else { newLane(); return nil }
+        rememberMarkers(of: song)
         selectedLaneID = lane.id
         let tc = timecode(for: song, at: max(0, seconds ?? transport.position()))
         let count = song.markers.filter { $0.laneID == lane.id }.count + 1
@@ -636,6 +650,7 @@ final class AppModel: ObservableObject {
     }
 
     func updateMarker(_ marker: Marker, in song: Song, _ change: (inout Marker) -> Void) {
+        rememberMarkers(of: song)
         edit { show in
             guard let s = show.songs.firstIndex(where: { $0.id == song.id }),
                   let m = show.songs[s].markers.firstIndex(where: { $0.id == marker.id }) else { return }
@@ -691,16 +706,33 @@ final class AppModel: ObservableObject {
         let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
         // ⌥← ⌥→ nudge the selected marker a frame (with ⇧, ten frames).
         if event.keyCode == 123 || event.keyCode == 124, mods.contains(.option), !mods.contains(.command), !mods.contains(.control) {
-            guard !locked, let song = currentSong, let marker = selectedMarker else { return false }
-            let step = (mods.contains(.shift) ? 10 : 1) * (event.keyCode == 123 ? -1 : 1)
-            nudge(marker, in: song, frames: step)
+            guard !locked, !selectedMarkerIDs.isEmpty else { return false }
+            nudgeSelected(frames: (mods.contains(.shift) ? 10 : 1) * (event.keyCode == 123 ? -1 : 1))
             return true
         }
+        // ⌘Z / ⇧⌘Z take back and redo marker changes; ⌘A selects every marker and trigger.
+        if mods == .command || mods == [.command, .shift] {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "z":
+                if mods.contains(.shift) { return redoMarkers() }
+                return undoMarkers()
+            case "a" where mods == .command:
+                selectAllMarkers()
+                return true
+            default:
+                return false
+            }
+        }
         guard mods.subtracting(.shift).isEmpty else { return false }
-        // Delete removes the selected marker or trigger (the last one added, while keying in).
+        // Esc clears the selection first (then goes back to the library as usual).
+        if event.keyCode == 53, !selectedMarkerIDs.isEmpty {
+            selectedMarkerIDs = []
+            return true
+        }
+        // Delete removes what's selected (the last trigger added, while keying in).
         if event.keyCode == 51 || event.keyCode == 117 {
-            guard !locked, let song = currentSong, let marker = selectedMarker else { return false }
-            deleteMarker(marker, in: song)
+            guard !locked, !selectedMarkerIDs.isEmpty else { return false }
+            deleteSelected()
             return true
         }
         guard !locked, let chars = event.charactersIgnoringModifiers, let key = TriggerLane.normalizedKey(chars),
@@ -750,6 +782,99 @@ final class AppModel: ObservableObject {
         let frame = timelineTrackFrame
         guard y >= frame.minY - 40, y <= frame.maxY + 20, p.x >= frame.minX - 200, p.x <= frame.maxX + 20 else { return nil }
         return min(Double(frame.width), max(0, Double(p.x - frame.minX)))
+    }
+
+    // MARK: Selection and marker undo
+
+    var selectedMarkers: [Marker] { currentSong?.markers.filter { selectedMarkerIDs.contains($0.id) } ?? [] }
+
+    /// Shift-click and ⌘-click add or remove one from the selection.
+    func toggleSelection(_ marker: Marker) {
+        if selectedMarkerIDs.contains(marker.id) { selectedMarkerIDs.remove(marker.id) } else { selectedMarkerIDs.insert(marker.id) }
+    }
+
+    func selectAllMarkers() {
+        selectedMarkerIDs = Set(currentSong?.markers.map(\.id) ?? [])
+    }
+
+    func deleteSelected() {
+        guard let song = currentSong, !locked else { return }
+        let gone = song.markers.filter { selectedMarkerIDs.contains($0.id) }
+        guard !gone.isEmpty else { return }
+        rememberMarkers(of: song)
+        withAnimation(.vivid(0.35)) {
+            edit { show in
+                guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+                show.songs[i].markers.removeAll { selectedMarkerIDs.contains($0.id) }
+            }
+        }
+        selectedMarkerIDs = []
+        let triggers = gone.filter { $0.laneID != nil }.count, markers = gone.count - triggers
+        var parts: [String] = []
+        if triggers > 0 { parts.append("\(triggers) trigger\(triggers == 1 ? "" : "s")") }
+        if markers > 0 { parts.append("\(markers) marker\(markers == 1 ? "" : "s")") }
+        post("Deleted \(parts.joined(separator: " and ")).", markerUndo: true)
+    }
+
+    /// Moves every selected marker by the same number of frames, keeping their spacing.
+    func shiftSelected(frames: Int) {
+        guard let song = currentSong, !locked, frames != 0, !selectedMarkerIDs.isEmpty else { return }
+        rememberMarkers(of: song)
+        let maxFrames = song.length.map { Int($0 * song.rate.framesPerSecond) }
+        edit { show in
+            guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+            for m in show.songs[i].markers.indices where selectedMarkerIDs.contains(show.songs[i].markers[m].id) {
+                var f = show.songs[i].markers[m].time.frames(since: song.start) + frames
+                f = max(0, maxFrames.map { min($0, f) } ?? f)
+                show.songs[i].markers[m].time = song.start.adding(frames: f)
+            }
+            show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
+        }
+    }
+
+    func nudgeSelected(frames: Int) { shiftSelected(frames: frames) }
+
+    /// Drags of a selected marker move the whole selection.
+    func moveSelected(by seconds: Double) {
+        guard let song = currentSong else { return }
+        shiftSelected(frames: Int((seconds * song.rate.framesPerSecond).rounded()))
+    }
+
+    private func rememberMarkers(of song: Song) {
+        guard !locked, let current = show?.songs.first(where: { $0.id == song.id }) else { return }
+        markerUndo.append((song.id, current.markers))
+        if markerUndo.count > 100 { markerUndo.removeFirst() }
+        markerRedo.removeAll()
+    }
+
+    var canUndoMarkers: Bool { !markerUndo.isEmpty }
+
+    @discardableResult
+    func undoMarkers() -> Bool {
+        guard !locked, let step = markerUndo.popLast() else { return false }
+        if let now = show?.songs.first(where: { $0.id == step.songID }) { markerRedo.append((step.songID, now.markers)) }
+        restoreMarkers(step)
+        return true
+    }
+
+    @discardableResult
+    func redoMarkers() -> Bool {
+        guard !locked, let step = markerRedo.popLast() else { return false }
+        if let now = show?.songs.first(where: { $0.id == step.songID }) { markerUndo.append((step.songID, now.markers)) }
+        restoreMarkers(step)
+        return true
+    }
+
+    private func restoreMarkers(_ step: (songID: UUID, markers: [Marker])) {
+        withAnimation(.vivid(0.3)) {
+            edit { show in
+                guard let i = show.songs.firstIndex(where: { $0.id == step.songID }) else { return }
+                show.songs[i].markers = step.markers
+            }
+        }
+        let ids = Set(step.markers.map(\.id))
+        selectedMarkerIDs = selectedMarkerIDs.intersection(ids)
+        if notice != nil && noticeOffersMarkerUndo { withAnimation(.vivid(0.3)) { notice = nil } }
     }
 
     func zoomTimeline(by factor: Double) {
@@ -974,8 +1099,9 @@ final class AppModel: ObservableObject {
         assign(url, role: role == .timecode ? .timecode : .master, to: song)
     }
 
-    func post(_ text: String, undo: Bool = false) {
+    func post(_ text: String, undo: Bool = false, markerUndo: Bool = false) {
         noticeOffersUndo = undo
+        noticeOffersMarkerUndo = markerUndo
         withAnimation(.vivid(0.3)) { notice = text }
         Task {
             try? await Task.sleep(nanoseconds: 7_000_000_000)
@@ -1261,10 +1387,15 @@ final class AppModel: ObservableObject {
                 var w = TimelineWindow(length: song.length ?? 24)
                 w.setZoom(3, around: 9.4)
                 timelineWindow = w
-                selectedMarkerID = song.markers.first { $0.label == "Go+ 3" }?.id
+                // A box selection across the lanes, between 10 and 18 seconds.
+                let fps = song.rate.framesPerSecond
+                selectedMarkerIDs = Set(song.markers.filter {
+                    let t = Double($0.time.frames(since: song.start)) / fps
+                    return t >= 10 && t <= 15 && $0.laneID != nil
+                }.map(\.id))
             }
             screen = target
-            transport.play()
+            if !zoomIn { transport.play() }
         }
     }
 
