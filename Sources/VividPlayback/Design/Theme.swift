@@ -100,16 +100,30 @@ struct Ambient: View {
 
     var body: some View {
         let (c1, c2) = song.map(SongArt.colors) ?? (Brand.gold, Color(hex: 0x5C6B8A))
+        // Two soft pools of colour. Drawn as radial gradients, not blurred shapes: a window-sized
+        // blur is redone by the GPU on every frame and made the whole app stutter.
         GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
             ZStack {
                 Brand.window
-                Circle().fill(c1).frame(width: geo.size.width * 0.55).position(x: geo.size.width * 0.3, y: geo.size.height * 0.12)
-                Circle().fill(c2).frame(width: geo.size.width * 0.6).position(x: geo.size.width * 0.82, y: geo.size.height * 0.4)
+                pool(c1, at: CGPoint(x: w * 0.3, y: h * 0.12), radius: w * 0.5)
+                pool(c2, at: CGPoint(x: w * 0.82, y: h * 0.4), radius: w * 0.55)
             }
-            .blur(radius: 120)
-            .opacity(0.5)
         }
         .ignoresSafeArea()
+        .drawingGroup()
         .animation(.vivid(0.9), value: song?.id)
+    }
+
+    private func pool(_ color: Color, at center: CGPoint, radius: CGFloat) -> some View {
+        RadialGradient(stops: [
+            .init(color: color.opacity(0.42), location: 0),
+            .init(color: color.opacity(0.22), location: 0.45),
+            .init(color: color.opacity(0.07), location: 0.75),
+            .init(color: color.opacity(0), location: 1),
+        ], center: .center, startRadius: 0, endRadius: radius)
+        .frame(width: radius * 2, height: radius * 2)
+        .position(center)
+        .allowsHitTesting(false)
     }
 }

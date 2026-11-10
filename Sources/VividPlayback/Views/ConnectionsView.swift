@@ -335,6 +335,7 @@ struct ConnectionsView: View {
                 .buttonStyle(QuietButtonStyle())
                 .disabled(control.settings.consoles.isEmpty || model.show == nil)
                 .help("Name each lane's executor on the console after the lane")
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
                 if let last = control.lastTrigger, Date().timeIntervalSince(last.at) < 120 {
                     HStack(spacing: 8) {
                         StatusDot(color: last.ok ? Brand.ok : Brand.warn)
@@ -345,6 +346,7 @@ struct ConnectionsView: View {
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(Capsule().fill(.white.opacity(0.06)))
                     .help(last.ok ? "Sent." : "Couldn't send. Check the address, the network, and Local Network access in System Settings › Privacy & Security.")
+                }
                 }
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], spacing: 16) {
@@ -512,12 +514,16 @@ struct ConnectionsView: View {
                     }
                     Spacer(minLength: 0)
                     VStack(alignment: .trailing, spacing: 8) {
-                        let fresh = CACurrentMediaTime() - control.incomingAt < 0.5
-                        ClockText(timecode: control.isFollowing ? control.incoming : nil, size: 40, weight: .light,
-                                  color: fresh ? Brand.gold : Brand.graphite)
-                        HStack(spacing: 8) {
-                            StatusDot(color: !control.isFollowing ? Brand.graphite : (fresh ? Brand.ok : Brand.warn), pulsing: fresh)
-                            Text(control.followStatus).font(.manrope(13, .medium)).foregroundStyle(Brand.steel)
+                        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !control.isFollowing)) { _ in
+                            let fresh = CACurrentMediaTime() - control.incomingAt < 0.5
+                            VStack(alignment: .trailing, spacing: 8) {
+                                ClockText(timecode: control.isFollowing ? control.incoming : nil, size: 40, weight: .light,
+                                          color: fresh ? Brand.gold : Brand.graphite)
+                                HStack(spacing: 8) {
+                                    StatusDot(color: !control.isFollowing ? Brand.graphite : (fresh ? Brand.ok : Brand.warn), pulsing: fresh)
+                                    Text(control.followStatus).font(.manrope(13, .medium)).foregroundStyle(Brand.steel)
+                                }
+                            }
                         }
                     }
                 }

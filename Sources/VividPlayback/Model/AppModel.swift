@@ -40,6 +40,8 @@ struct AVAudioFileReader: AudioFileReading {
 struct WaveformData {
     var peaks: [Float] = []
     var perSecond: Double = 1
+    /// Identifies this set of peaks, so the waveform is only redrawn when it changes.
+    var token = UUID()
 
     /// The loudest peak between two times in the file (seconds), 0...1.
     func peak(from t0: Double, to t1: Double) -> Float {

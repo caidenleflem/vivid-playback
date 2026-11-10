@@ -363,3 +363,19 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   `Label Exec {page}.{exec} "{name}"` (editable, saved per Mac); double quotes in names become
   single quotes. **Needs a check on the console** that labelling the executor names its sequence.
 - 99 tests pass.
+
+## 2026-11-10: smooth UI, pulses on the sound
+
+- The ambient background was two window-sized shapes under a 120 pt blur, redone by the GPU every
+  frame. Now radial gradients in a drawing group: the same look, next to no cost.
+- The timeline rebuilt every lane, trigger and the waveform 30 times a second while playing. Now
+  the still parts are drawn once (on song, zoom or edit changes) and only a live layer redraws per
+  frame: the playhead, the played part of the waveform (an equatable waveform masked to the
+  playhead) and the trigger pulses. The waveform is one path per draw.
+- Trigger pulses during playback are drawn from the playhead itself (the position you hear,
+  latency included), at 60 fps, instead of travelling audio queue → main thread → re-render →
+  animation. Manual fires (Fire Now, lane keys) still use the animated pulse.
+- Values that changed every frame no longer publish to every view: incoming timecode while
+  following, the last trigger sent; the follow status only publishes when it changes. The
+  Connections page reads those on its own timer.
+- CI records CPU for the app and the window server on each screen while playing.

@@ -156,8 +156,6 @@ struct TimelinePanel: View {
     @EnvironmentObject private var transport: Transport
     @EnvironmentObject private var control: ControlCenter
     let song: Song
-    /// The whole timeline arrives with the screen; nothing draws in separately.
-    @State private var reveal: CGFloat = 1
     /// A trigger being dragged along its lane, and how far.
     @State private var dragging: (id: UUID, dx: CGFloat)?
     /// A selection box being dragged across the lanes, in the tracks' coordinates.
@@ -187,75 +185,67 @@ struct TimelinePanel: View {
                 let lanesHeight = 22 + 10 + waveHeight + 10 + 26 + markerSpace + laneSpace
                 let scrubLimit = 22 + 10 + waveHeight + 10 + 26
                 let linesBottom = lanesHeight - (lanes.isEmpty ? 0 : 32)
-                SongProgress { position, _ in
-                    let win = displayWindow(length: length, playhead: position)
-                    let playheadX = CGFloat(win.x(position, width: Double(trackWidth)))
-                    VStack(alignment: .leading, spacing: 10) {
-                        ruler(width: trackWidth, win: win)
-                        lane("Master") {
-                            WaveformView(data: model.waveforms[song.id], fileOffset: song.fileOffset,
-                                         from: win.start, to: win.end, playhead: position)
-                                .frame(height: waveHeight)
-                                .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.02)))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        lane("Timecode") { timecodeLane(win) }
-                        if !plain.isEmpty {
-                            lane("Markers") { markerLane(plain, width: trackWidth, win: win) }
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-                        if !lanes.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(lanes) { l in
-                                    triggerLane(l, height: laneHeight, width: trackWidth, win: win)
-                                        .transition(.opacity.combined(with: .move(edge: .top)))
-                                }
-                                addLaneRow
-                            }
+                // Drawn once, not every frame: the lanes, markers, waveform and ruler only change
+                // when the song, the zoom or an edit changes them. Only `liveLayer` (playhead,
+                // played part of the waveform, pulses) redraws while playing.
+                let win = staticWindow(length: length)
+                let rows = markerRows(scrubLimit: scrubLimit, laneHeight: laneHeight)
+                VStack(alignment: .leading, spacing: 10) {
+                    ruler(width: trackWidth, win: win)
+                    lane("Master") {
+                        WaveformView(data: model.waveforms[song.id], fileOffset: song.fileOffset,
+                                     from: win.start, to: win.end, played: false)
+                            .equatable()
+                            .frame(height: waveHeight)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.02)))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    lane("Timecode") { timecodeLane(win) }
+                    if !plain.isEmpty {
+                        lane("Markers") { markerLane(plain, width: trackWidth, win: win) }
                             .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
                     }
-                    .mask(alignment: .leading) {
-                        // The lanes draw in from the playhead outward when the timeline opens.
-                        let span = max(playheadX, trackWidth - playheadX) * reveal
-                        HStack(spacing: 0) {
-                            Rectangle().frame(width: labelWidth + 12)
-                            Rectangle().frame(width: max(0, 2 * span)).offset(x: playheadX - span)
-                            Spacer(minLength: 0)
+                    if !lanes.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(lanes) { l in
+                                triggerLane(l, height: laneHeight, width: trackWidth, win: win)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+                            addLaneRow
                         }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    .overlay(alignment: .topLeading) {
-                      // An explicit top-left stack: the overlay's own grouping centres its pieces on each other.
-                      ZStack(alignment: .topLeading) {
-                        if let loop = transport.loop {
-                            let x0 = min(trackWidth, max(0, CGFloat(win.x(loop.lowerBound, width: Double(trackWidth)))))
-                            let x1 = min(trackWidth, max(0, CGFloat(win.x(loop.upperBound, width: Double(trackWidth)))))
-                            Rectangle().fill(Brand.gold.opacity(0.08))
-                                .overlay(alignment: .top) { Rectangle().fill(Brand.gold.opacity(0.6)).frame(height: 2) }
-                                .frame(width: max(2, x1 - x0), height: linesBottom - 24)
-                                .offset(x: labelWidth + 12 + x0, y: 24)
-                                .allowsHitTesting(false)
-                        }
-                        markerLines(width: trackWidth, win: win, height: linesBottom - 30)
-                            .offset(x: labelWidth + 12)
-                        if playheadX >= -1 && playheadX <= trackWidth + 1 {
-                            playhead(position: position, height: linesBottom - 18)
-                                .offset(x: labelWidth + 12 + playheadX - 1)
-                        }
-                        marqueeBox
-                      }
-                    }
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { value in
-                        // Scrub on the waveform and timecode lanes; the marker and executor lanes keep their clicks.
-                        let x = value.location.x - labelWidth - 12
-                        guard x >= 0, trackWidth > 0, value.startLocation.y < scrubLimit else { return }
-                        transport.locate(win.time(atX: Double(min(x, trackWidth)), width: Double(trackWidth)))
-                    })
-                    .simultaneousGesture(marqueeGesture(scrubLimit: scrubLimit, laneHeight: laneHeight, width: trackWidth, win: win))
-                    .onAppear { reportTrackFrame(geo, trackWidth: trackWidth) }
-                    .onChange(of: geo.frame(in: .global)) { _ in reportTrackFrame(geo, trackWidth: trackWidth) }
                 }
+                .overlay(alignment: .topLeading) {
+                  // An explicit top-left stack: the overlay's own grouping centres its pieces on each other.
+                  ZStack(alignment: .topLeading) {
+                    if let loop = transport.loop {
+                        let x0 = min(trackWidth, max(0, CGFloat(win.x(loop.lowerBound, width: Double(trackWidth)))))
+                        let x1 = min(trackWidth, max(0, CGFloat(win.x(loop.upperBound, width: Double(trackWidth)))))
+                        Rectangle().fill(Brand.gold.opacity(0.08))
+                            .overlay(alignment: .top) { Rectangle().fill(Brand.gold.opacity(0.6)).frame(height: 2) }
+                            .frame(width: max(2, x1 - x0), height: linesBottom - 24)
+                            .offset(x: labelWidth + 12 + x0, y: 24)
+                            .allowsHitTesting(false)
+                    }
+                    markerLines(width: trackWidth, win: win, height: linesBottom - 30)
+                        .offset(x: labelWidth + 12)
+                    liveLayer(length: length, trackWidth: trackWidth, waveHeight: waveHeight,
+                              linesBottom: linesBottom, rows: rows)
+                        .allowsHitTesting(false)
+                    marqueeBox
+                  }
+                }
+                .contentShape(Rectangle())
+                .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    // Scrub on the waveform and timecode lanes; the marker and executor lanes keep their clicks.
+                    let x = value.location.x - labelWidth - 12
+                    guard x >= 0, trackWidth > 0, value.startLocation.y < scrubLimit else { return }
+                    transport.locate(win.time(atX: Double(min(x, trackWidth)), width: Double(trackWidth)))
+                })
+                .simultaneousGesture(marqueeGesture(scrubLimit: scrubLimit, laneHeight: laneHeight, width: trackWidth, win: win))
+                .onAppear { reportTrackFrame(geo, trackWidth: trackWidth) }
+                .onChange(of: geo.frame(in: .global)) { _ in reportTrackFrame(geo, trackWidth: trackWidth) }
             }
             if plain.isEmpty && lanes.isEmpty {
                 HStack(spacing: 8) {
@@ -288,7 +278,6 @@ struct TimelinePanel: View {
         .animation(.vivid(0.4), value: lanes)
         .onAppear {
             model.loadWaveform(for: song)
-            reveal = 1
         }
     }
 
@@ -300,19 +289,96 @@ struct TimelinePanel: View {
         }
     }
 
-    /// The window shown: the zoom you set, paging along with the playhead while playing.
-    private func displayWindow(length: Double, playhead: Double) -> TimelineWindow {
-        var w = model.timelineWindow
-        if abs(w.length - length) > 0.0005 { w = TimelineWindow(length: length, zoom: w.zoom, start: w.start) }
-        if transport.isPlaying && w.isZoomed {
-            let before = w.start
-            w.follow(playhead)
-            if w.start != before {
-                let start = w.start
-                DispatchQueue.main.async { model.showInTimeline(start: start) }
+    /// The window the still parts are drawn in: the zoom you set (kept in step with the song's length).
+    private func staticWindow(length: Double) -> TimelineWindow {
+        let w = model.timelineWindow
+        return abs(w.length - length) > 0.0005 ? TimelineWindow(length: length, zoom: w.zoom, start: w.start) : w
+    }
+
+    /// Everything that moves while playing, redrawn every frame on its own: the playhead, the
+    /// played part of the waveform, and the pulse of each trigger as the playhead (the position
+    /// you hear) crosses it, so pulses land with the sound. Paging along when zoomed starts here.
+    private func liveLayer(length: Double, trackWidth: CGFloat, waveHeight: CGFloat, linesBottom: CGFloat,
+                           rows: [(laneID: UUID?, top: CGFloat, height: CGFloat)]) -> some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !transport.isPlaying)) { _ in
+            let position = min(transport.position(at: CACurrentMediaTime()), length)
+            let win = livePage(staticWindow(length: length), playhead: position)
+            let playheadX = CGFloat(win.x(position, width: Double(trackWidth)))
+            ZStack(alignment: .topLeading) {
+                // The played part of the waveform: the same bars, lighter, up to the playhead.
+                WaveformView(data: model.waveforms[song.id], fileOffset: song.fileOffset,
+                             from: win.start, to: win.end, played: true)
+                    .equatable()
+                    .frame(width: trackWidth, height: waveHeight)
+                    .mask(alignment: .leading) {
+                        Rectangle().frame(width: min(trackWidth, max(0, playheadX)))
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .offset(x: labelWidth + 12, y: 32)
+                if transport.isPlaying {
+                    pulses(position: position, win: win, width: trackWidth, rows: rows)
+                }
+                if playheadX >= -1 && playheadX <= trackWidth + 1 {
+                    playhead(position: position, height: linesBottom - 18)
+                        .offset(x: labelWidth + 12 + playheadX - 1)
+                }
             }
         }
-        return w
+    }
+
+    /// While playing zoomed in, the window pages along with the playhead.
+    private func livePage(_ w: TimelineWindow, playhead: Double) -> TimelineWindow {
+        guard transport.isPlaying, w.isZoomed else { return w }
+        var paged = w
+        paged.follow(playhead)
+        if paged.start != w.start {
+            let start = paged.start
+            DispatchQueue.main.async { model.showInTimeline(start: start) }
+        }
+        return paged
+    }
+
+    /// The bloom on each trigger and the glow on its lane's name, from the moment the playhead
+    /// crosses it: as fast as the sound, with no trip through the main thread.
+    private func pulses(position: Double, win: TimelineWindow, width: CGFloat,
+                        rows: [(laneID: UUID?, top: CGFloat, height: CGFloat)]) -> some View {
+        let bloomTime = 0.3, glowTime = 0.4
+        var blooms: [(id: UUID, x: CGFloat, top: CGFloat, height: CGFloat, p: CGFloat)] = []
+        var glows: [(id: UUID, top: CGFloat, height: CGFloat, p: CGFloat, color: Color)] = []
+        for row in rows {
+            guard let laneID = row.laneID, let lane = lanes.first(where: { $0.id == laneID }), !lane.muted else { continue }
+            var strongest: CGFloat = 0
+            for m in song.markers where m.laneID == laneID {
+                let dt = position - model.seconds(of: m, in: song)
+                guard dt >= 0, dt < glowTime else { continue }
+                strongest = max(strongest, CGFloat(1 - dt / glowTime))
+                if dt < bloomTime {
+                    let u = CGFloat(1 - dt / bloomTime)
+                    let x = xPos(of: m, width: width, win: win)
+                    if x >= -20 && x <= width + 20 {
+                        blooms.append((m.id, labelWidth + 12 + x, row.top + 4, max(8, row.height - 8), u * u))
+                    }
+                }
+            }
+            if strongest > 0 { glows.append((laneID, row.top, row.height, strongest * strongest, Brand.lane(lane.color))) }
+        }
+        return ZStack(alignment: .topLeading) {
+            ForEach(glows, id: \.id) { g in
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(g.color.opacity(0.32 * g.p))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(g.color.opacity(0.7 * g.p), lineWidth: 1))
+                    .frame(width: labelWidth, height: g.height)
+                    .offset(y: g.top)
+            }
+            ForEach(blooms, id: \.id) { b in
+                Capsule()
+                    .fill(Brand.gold)
+                    .frame(width: reduceMotion ? 3 : 3 + 18 * b.p, height: b.height)
+                    .blur(radius: reduceMotion ? 0 : 5 * b.p)
+                    .opacity(0.95 * Double(b.p))
+                    .offset(x: b.x - (reduceMotion ? 1.5 : (3 + 18 * b.p) / 2), y: b.top)
+            }
+        }
     }
 
     private func reportTrackFrame(_ geo: GeometryProxy, trackWidth: CGFloat) {
@@ -756,7 +822,7 @@ struct TimelinePanel: View {
 
     private func triggerTick(_ m: Marker, lane: TriggerLane, color: Color, height: CGFloat, width: CGFloat, win: TimelineWindow,
                              room: CGFloat) -> some View {
-        let fired = control.firedAt[m.id].map { Date().timeIntervalSince($0) < 0.35 } ?? false
+        let fired = false
         let dx = dragOffset(m.id)
         let x = xPos(of: m, width: width, win: win) + dx
         let selected = model.selectedMarkerIDs.contains(m.id)
@@ -918,34 +984,43 @@ struct TimelinePanel: View {
     }
 }
 
-/// Peak bars for the stretch of the song on screen: played part off-white, the rest graphite.
-struct WaveformView: View {
+/// Peak bars for the stretch of the song on screen, in one colour (the played part is a second
+/// copy, masked to the playhead). Equatable, so it's only redrawn when what it shows changes.
+struct WaveformView: View, Equatable {
     let data: WaveformData?
     /// Song time 0 is this far into the file.
     let fileOffset: Double
     let from: Double
     let to: Double
-    let playhead: Double
+    let played: Bool
+
+    static func == (a: WaveformView, b: WaveformView) -> Bool {
+        a.data?.token == b.data?.token && a.fileOffset == b.fileOffset && a.from == b.from && a.to == b.to && a.played == b.played
+    }
 
     var body: some View {
         Canvas { ctx, size in
             guard let data, !data.peaks.isEmpty, to > from else {
-                ctx.fill(Path(CGRect(x: 0, y: size.height / 2 - 0.5, width: size.width, height: 1)), with: .color(Brand.arsenic))
+                if !played {
+                    ctx.fill(Path(CGRect(x: 0, y: size.height / 2 - 0.5, width: size.width, height: 1)), with: .color(Brand.arsenic))
+                }
                 return
             }
             let barWidth: CGFloat = 2
             let gap: CGFloat = 1
             let count = Int(size.width / (barWidth + gap))
             let perBar = (to - from) / Double(max(count, 1))
+            var path = Path()
             for i in 0..<count {
                 let x = CGFloat(i) * (barWidth + gap)
                 let t = from + Double(i) * perBar
                 let peak = CGFloat(data.peak(from: t + fileOffset, to: t + perBar + fileOffset))
                 let h = max(1, peak * size.height * 0.92)
-                let rect = CGRect(x: x, y: (size.height - h) / 2, width: barWidth, height: h)
-                ctx.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(t < playhead ? Color(hex: 0xE9E9EE) : Color(hex: 0x3A3C46)))
+                path.addRoundedRect(in: CGRect(x: x, y: (size.height - h) / 2, width: barWidth, height: h), cornerSize: CGSize(width: 1, height: 1))
             }
+            ctx.fill(path, with: .color(played ? Color(hex: 0xE9E9EE) : Color(hex: 0x3A3C46)))
         }
+        .drawingGroup()
     }
 }
 

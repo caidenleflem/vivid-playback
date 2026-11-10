@@ -127,8 +127,10 @@ final class ControlCenter: ObservableObject {
     @Published private(set) var lastRemote: (text: String, at: Date)?
     @Published var learning: RemoteAction?
     /// Incoming timecode while following, and when it last arrived.
-    @Published private(set) var incoming: Timecode?
-    @Published private(set) var incomingAt: Double = 0
+    // Not published: these change every frame while following, and publishing them redrew every
+    // view that watches the control centre. The Connections page reads them on its own timer.
+    private(set) var incoming: Timecode?
+    private(set) var incomingAt: Double = 0
     @Published private(set) var followStatus = "Off"
     @Published private(set) var followProblem: String?
 
@@ -140,7 +142,7 @@ final class ControlCenter: ObservableObject {
     /// When each lane last fired a trigger (the lane's pulse).
     @Published private(set) var laneFiredAt: [UUID: Date] = [:]
     /// The last trigger sent, for the Consoles section.
-    @Published private(set) var lastTrigger: (text: String, ok: Bool, at: Date)?
+    private(set) var lastTrigger: (text: String, ok: Bool, at: Date)?
     /// Lights a trigger in the timeline as if it had just fired.
     func flash(_ id: UUID?, lane: UUID?) {
         let now = Date()
@@ -166,9 +168,9 @@ final class ControlCenter: ObservableObject {
     init(clock: OutputClock) {
         sender = TimecodeSender(clock: clock, midi: midi)
         triggers = TriggerService(clock: clock)
-        triggers.onFire = { [weak self] id, laneID in
-            Task { @MainActor in self?.flash(id, lane: laneID) }
-        }
+        // Triggers fired by playback pulse straight from the playhead (on the clock you hear);
+        // only manual fires (Fire Now, lane keys) go through `flash`.
+        triggers.onFire = nil
         triggers.onSend = { [weak self] text, ok in
             Task { @MainActor in self?.lastTrigger = (text, ok, Date()) }
         }
@@ -331,7 +333,8 @@ final class ControlCenter: ObservableObject {
     private func followTick() {
         guard settings.follow != .off, let ctx = followContext?() else { return }
         let actions = chase.tick(at: CACurrentMediaTime(), playing: ctx.playing)
-        if CACurrentMediaTime() - incomingAt > 0.5, incoming != nil {
+        // Only when it changes: setting a published value redraws everything watching it.
+        if CACurrentMediaTime() - incomingAt > 0.5, incoming != nil, followStatus != "Timecode stopped" {
             followStatus = "Timecode stopped"
         }
         if !actions.isEmpty { onFollow?(actions) }
