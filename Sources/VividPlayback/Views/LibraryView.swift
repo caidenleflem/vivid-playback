@@ -521,12 +521,18 @@ struct SongList: View {
             return false
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            guard !skipped else { return }
-            if !isCurrent { model.cue(song) }
-            model.go(.timeline)
+        // One click selects, a double-click plays the song (straight away: no waiting to see if
+        // a third click comes), and a third click opens its timeline.
+        .onTapGesture {
+            selected = song.id
+            let clicks = NSApp.currentEvent?.clickCount ?? 1
+            guard clicks >= 2, !skipped else { return }
+            if clicks == 2 {
+                model.playFromList(song)
+            } else if clicks == 3 {
+                model.go(.timeline)
+            }
         }
-        .onTapGesture { selected = song.id }
         .contextMenu {
             Button("Cue This Song") { model.cue(song) }.disabled(skipped)
             Button("Open Timeline") { model.cue(song); model.go(.timeline) }.disabled(skipped)

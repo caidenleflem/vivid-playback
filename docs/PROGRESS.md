@@ -343,3 +343,9 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   unit, so nothing reflows mid-transition. The timeline's draw-in wipe is gone. Reduce Motion: a
   0.18 s crossfade.
 - 97 tests pass.
+
+## 2026-11-10: double-click plays, triple-click opens the timeline
+
+- Song list: one click selects, a double-click plays the song from its top (the song already
+  playing carries on), a third click opens the timeline. Read from the click's own count, so the
+  double-click acts at once instead of waiting out a possible third click.

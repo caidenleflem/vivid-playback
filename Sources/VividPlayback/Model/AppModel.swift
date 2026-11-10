@@ -582,6 +582,16 @@ final class AppModel: ObservableObject {
         loadWaveform(for: song)
     }
 
+    /// Double-click in the song list: play this song from its top. The song already playing
+    /// carries on rather than starting over.
+    func playFromList(_ song: Song) {
+        if currentSong?.id == song.id {
+            if !transport.isPlaying { transport.play() }
+        } else {
+            cue(song, play: true)
+        }
+    }
+
     func next() {
         guard let n = nextSong else { return }
         cue(n)
