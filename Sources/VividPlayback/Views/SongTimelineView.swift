@@ -35,52 +35,70 @@ struct SongTimelineView: View {
             if let song = model.currentSong { Chip(song.rate.displayName) }
             if transport.isLoading { ProgressView().controlSize(.small) }
             Spacer()
-            Button { model.toggleLoop() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "repeat").foregroundStyle(transport.loop != nil ? Brand.gold : Brand.ink)
-                    Text(transport.loop != nil ? "Looping" : "Loop")
-                    KeyCap(key: "L")
-                }
+            // Full labels when there's room; icons and keys when the window is narrow.
+            ViewThatFits(in: .horizontal) {
+                actions(compact: false)
+                actions(compact: true)
             }
-            .buttonStyle(QuietButtonStyle())
-            .help("Loop between the markers either side of the playhead, or the whole song")
-            Button { model.addMarker() } label: {
-                HStack(spacing: 8) { Image(systemName: "plus"); Text("Marker"); KeyCap(key: "M") }
-            }
-            .buttonStyle(QuietButtonStyle())
-            .disabled(model.locked)
-            .help("Drop a marker at the playhead")
-            Button { model.addTrigger() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: model.lanes.isEmpty ? "rectangle.stack.badge.plus" : "bolt.fill")
-                        .foregroundStyle(model.selectedLane.map { Brand.lane($0.color) } ?? Brand.ink)
-                    Text(model.lanes.isEmpty ? "Trigger lane" : "Trigger")
-                    KeyCap(key: "C")
-                }
-            }
-            .buttonStyle(QuietButtonStyle())
-            .disabled(model.locked)
-            .help(model.lanes.isEmpty ? "Add a lane that fires an MA3 executor over OSC"
-                                      : "Drop a trigger at the playhead on \(model.selectedLane?.title ?? "the chosen lane")")
-            Button { model.toggleDeskRecording() } label: {
-                HStack(spacing: 8) {
-                    Circle().fill(Color(hex: 0xE5675A)).frame(width: 8, height: 8)
-                        .opacity(model.recordingFromDesk ? 1 : 0.55)
-                    Text(model.recordingFromDesk ? "Recording desk" : "Record desk")
-                }
-            }
-            .buttonStyle(QuietButtonStyle(prominent: false))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color(hex: 0xE5675A).opacity(model.recordingFromDesk ? 0.8 : 0), lineWidth: 1))
-            .disabled(model.locked && !model.recordingFromDesk)
-            .help(model.recordingFromDesk ? "Stop recording GOs from the desk (⇧⌘R)"
-                                          : "Record GOs from the desk: each one lands on its executor's lane at the frame you hear (⇧⌘R)")
             Button("Done") { model.go(.library) }
                 .buttonStyle(QuietButtonStyle())
         }
         .padding(.horizontal, 14)
         .frame(height: 58)
         .glass(cornerRadius: 16, alpha: 0.76)
+    }
+
+    private func actions(compact: Bool) -> some View {
+        HStack(spacing: compact ? 8 : 14) {
+            Button { model.toggleLoop() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "repeat").foregroundStyle(transport.loop != nil ? Brand.gold : Brand.ink)
+                    if !compact { Text(transport.loop != nil ? "Looping" : "Loop") }
+                    KeyCap(key: "L")
+                }
+                .fixedSize()
+            }
+            .buttonStyle(QuietButtonStyle())
+            .help("Loop between the markers either side of the playhead, or the whole song (L)")
+            Button { model.addMarker() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus")
+                    if !compact { Text("Marker") }
+                    KeyCap(key: "M")
+                }
+                .fixedSize()
+            }
+            .buttonStyle(QuietButtonStyle())
+            .disabled(model.locked)
+            .help("Drop a marker at the playhead (M)")
+            Button { model.addTrigger() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: model.lanes.isEmpty ? "rectangle.stack.badge.plus" : "bolt.fill")
+                        .foregroundStyle(model.selectedLane.map { Brand.lane($0.color) } ?? Brand.ink)
+                    if !compact { Text(model.lanes.isEmpty ? "Trigger lane" : "Trigger") }
+                    KeyCap(key: "C")
+                }
+                .fixedSize()
+            }
+            .buttonStyle(QuietButtonStyle())
+            .disabled(model.locked)
+            .help(model.lanes.isEmpty ? "Add a lane that fires an MA3 executor over OSC (C)"
+                                      : "Drop a trigger at the playhead on \(model.selectedLane?.title ?? "the chosen lane") (C)")
+            Button { model.toggleDeskRecording() } label: {
+                HStack(spacing: 8) {
+                    Circle().fill(Color(hex: 0xE5675A)).frame(width: 8, height: 8)
+                        .opacity(model.recordingFromDesk ? 1 : 0.55)
+                    if !compact { Text(model.recordingFromDesk ? "Recording desk" : "Record desk") }
+                }
+                .fixedSize()
+            }
+            .buttonStyle(QuietButtonStyle())
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color(hex: 0xE5675A).opacity(model.recordingFromDesk ? 0.8 : 0), lineWidth: 1))
+            .disabled(model.locked && !model.recordingFromDesk)
+            .help(model.recordingFromDesk ? "Stop recording GOs from the desk (⇧⌘R)"
+                                          : "Record GOs from the desk: each one lands on its executor's lane at the frame you hear (⇧⌘R)")
+        }
     }
 
     private func header(_ song: Song) -> some View {
@@ -141,7 +159,13 @@ struct SongTimelineView: View {
                 .font(.manrope(12.5))
             }
             Spacer(minLength: 0)
+            if model.recordingFromDesk {
+                DeskRecordingBadge()
+                    .frame(maxWidth: 360, alignment: .trailing)
+                    .transition(.opacity)
+            }
         }
+        .animation(.vivid(0.3), value: model.recordingFromDesk)
     }
 
     /// "Master  03 Night Drive.wav": click the name to choose or replace the file; right-click to remove it.
@@ -287,10 +311,7 @@ struct TimelinePanel: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .solidPanel()
         .overlay(alignment: .bottom) { selectionBar.padding(.bottom, 12) }
-        .overlay(alignment: .topTrailing) {
-            if model.recordingFromDesk { DeskRecordingBadge().padding(.top, 10).padding(.trailing, 14).transition(.opacity) }
-        }
-        .animation(.vivid(0.3), value: model.recordingFromDesk)
+
         .animation(.vivid(0.3), value: model.selectedMarkerIDs.isEmpty)
         .animation(.vivid(0.4), value: lanes)
         .onAppear {
@@ -1110,19 +1131,23 @@ struct DeskRecordingBadge: View {
     @EnvironmentObject private var control: ControlCenter
 
     var body: some View {
-        HStack(spacing: 8) {
-            StatusDot(color: Color(hex: 0xE5675A), pulsing: transport.isPlaying)
-            Text(transport.isPlaying ? "Recording from the desk" : "Armed · play to record")
-                .font(.manrope(11.5, .bold)).foregroundStyle(Brand.ink)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                StatusDot(color: Color(hex: 0xE5675A), pulsing: transport.isPlaying)
+                Text(transport.isPlaying ? "Recording from the desk" : "Armed · play to record")
+                    .font(.manrope(12, .bold)).foregroundStyle(Brand.ink)
+            }
             if let last = model.lastDeskGo, Date().timeIntervalSince(last.at) < 20 {
-                Text(last.text).font(.manrope(11.5, .medium).monospacedDigit()).foregroundStyle(Brand.steel).lineLimit(1)
-            } else if !control.deskStatus.isEmpty && control.deskStatus.hasPrefix("Port") {
-                Text(control.deskStatus).font(.manrope(11.5)).foregroundStyle(Brand.warn).lineLimit(1)
+                Text(last.text).font(.manrope(11.5, .medium).monospacedDigit()).foregroundStyle(Brand.steel).lineLimit(2)
+            } else if control.deskStatus.hasPrefix("Port") {
+                Text(control.deskStatus).font(.manrope(11.5)).foregroundStyle(Brand.warn).lineLimit(2)
+            } else {
+                Text("Each GO lands on its executor's lane.").font(.manrope(11.5)).foregroundStyle(Brand.space)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        .background(Capsule().fill(Brand.phantom))
-        .overlay(Capsule().strokeBorder(Color(hex: 0xE5675A).opacity(0.5), lineWidth: 1))
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Brand.phantom))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(hex: 0xE5675A).opacity(0.5), lineWidth: 1))
         .help("GOs arrive as OSC /vivid/exec (\"1.201\") or MIDI Show Control. ⌘Z takes back what was recorded.")
     }
 }
