@@ -363,6 +363,23 @@ struct ConnectionsView: View {
                             step(3, "Turn on Receive and Receive Command, and enable OSC.")
                             step(4, "Back here, Edit Lane › Fire now. The executor should go.")
                         }
+                        Text("Record from the desk").font(.manrope(14, .semibold)).foregroundStyle(Brand.ink).padding(.top, 8)
+                        VStack(alignment: .leading, spacing: 6) {
+                            step(1, "Timeline › Record desk (⇧⌘R), then play the song.")
+                            step(2, "Each GO lands on the lane for its executor. A new executor gets a new lane.")
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text("3").font(.manrope(11, .bold).monospacedDigit()).foregroundStyle(Brand.gold)
+                                    .frame(width: 18, height: 18).background(Circle().fill(Brand.gold.opacity(0.12)))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("From the desk, either:").font(.manrope(12.5)).foregroundStyle(Brand.steel)
+                                    Text("SendOSC 1 \"/vivid/exec,s,1.201\"")
+                                        .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Brand.champagne)
+                                        .textSelection(.enabled)
+                                    Text("in a macro or a cue's command (OSC in must be on), or MIDI Show Control out to this Mac (MIDI, or the network on port \(control.settings.mscPort)).")
+                                        .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
                     }
                     Spacer(minLength: 0)
                     VStack(alignment: .leading, spacing: 10) {

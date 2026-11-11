@@ -62,6 +62,19 @@ struct SongTimelineView: View {
             .disabled(model.locked)
             .help(model.lanes.isEmpty ? "Add a lane that fires an MA3 executor over OSC"
                                       : "Drop a trigger at the playhead on \(model.selectedLane?.title ?? "the chosen lane")")
+            Button { model.toggleDeskRecording() } label: {
+                HStack(spacing: 8) {
+                    Circle().fill(Color(hex: 0xE5675A)).frame(width: 8, height: 8)
+                        .opacity(model.recordingFromDesk ? 1 : 0.55)
+                    Text(model.recordingFromDesk ? "Recording desk" : "Record desk")
+                }
+            }
+            .buttonStyle(QuietButtonStyle(prominent: false))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color(hex: 0xE5675A).opacity(model.recordingFromDesk ? 0.8 : 0), lineWidth: 1))
+            .disabled(model.locked && !model.recordingFromDesk)
+            .help(model.recordingFromDesk ? "Stop recording GOs from the desk (⇧⌘R)"
+                                          : "Record GOs from the desk: each one lands on its executor's lane at the frame you hear (⇧⌘R)")
             Button("Done") { model.go(.library) }
                 .buttonStyle(QuietButtonStyle())
         }
@@ -274,6 +287,10 @@ struct TimelinePanel: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .solidPanel()
         .overlay(alignment: .bottom) { selectionBar.padding(.bottom, 12) }
+        .overlay(alignment: .topTrailing) {
+            if model.recordingFromDesk { DeskRecordingBadge().padding(.top, 10).padding(.trailing, 14).transition(.opacity) }
+        }
+        .animation(.vivid(0.3), value: model.recordingFromDesk)
         .animation(.vivid(0.3), value: model.selectedMarkerIDs.isEmpty)
         .animation(.vivid(0.4), value: lanes)
         .onAppear {
@@ -1083,5 +1100,29 @@ struct FireBloom: View {
                 withTransaction(instant) { settle = 0 }
                 DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.3)) { settle = 1 } }
             }
+    }
+}
+
+/// "● Recording from the desk · OSC GO 1.201 → Main cues at 03:00:12:04", while armed.
+struct DeskRecordingBadge: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var transport: Transport
+    @EnvironmentObject private var control: ControlCenter
+
+    var body: some View {
+        HStack(spacing: 8) {
+            StatusDot(color: Color(hex: 0xE5675A), pulsing: transport.isPlaying)
+            Text(transport.isPlaying ? "Recording from the desk" : "Armed · play to record")
+                .font(.manrope(11.5, .bold)).foregroundStyle(Brand.ink)
+            if let last = model.lastDeskGo, Date().timeIntervalSince(last.at) < 20 {
+                Text(last.text).font(.manrope(11.5, .medium).monospacedDigit()).foregroundStyle(Brand.steel).lineLimit(1)
+            } else if !control.deskStatus.isEmpty && control.deskStatus.hasPrefix("Port") {
+                Text(control.deskStatus).font(.manrope(11.5)).foregroundStyle(Brand.warn).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Capsule().fill(Brand.phantom))
+        .overlay(Capsule().strokeBorder(Color(hex: 0xE5675A).opacity(0.5), lineWidth: 1))
+        .help("GOs arrive as OSC /vivid/exec (\"1.201\") or MIDI Show Control. ⌘Z takes back what was recorded.")
     }
 }

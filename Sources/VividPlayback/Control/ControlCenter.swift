@@ -23,6 +23,8 @@ struct ControlSettings: Codable, Equatable {
     var keysFire = true
     /// The command that names an executor's sequence, for Import Labels to Console.
     var labelTemplate = ExecutorLabel.defaultTemplate
+    /// The UDP port MIDI Show Control arrives on from the network (Record from the desk).
+    var mscPort: UInt16 = 6004
 
     init() {}
 
@@ -46,6 +48,7 @@ struct ControlSettings: Codable, Equatable {
         fireEarlyMs = try c.decodeIfPresent(Double.self, forKey: .fireEarlyMs) ?? d.fireEarlyMs
         keysFire = try c.decodeIfPresent(Bool.self, forKey: .keysFire) ?? d.keysFire
         labelTemplate = try c.decodeIfPresent(String.self, forKey: .labelTemplate) ?? d.labelTemplate
+        mscPort = try c.decodeIfPresent(UInt16.self, forKey: .mscPort) ?? d.mscPort
     }
 
     static func load() -> ControlSettings {
@@ -161,6 +164,10 @@ final class ControlCenter: ObservableObject {
 
     /// Set by the app model.
     var onCommand: ((RemoteCommand) -> Void)?
+    /// A GO from the desk (OSC /vivid/exec or MIDI Show Control), for Record from the desk.
+    var onDeskGo: ((DeskGo) -> Void)?
+    private var mscIn: UDPSocket?
+    @Published private(set) var deskStatus = ""
     var onFollow: (([ChaseEngine.Action]) -> Void)?
     var followContext: (() -> (songs: [Song], current: UUID?, playhead: Double, playing: Bool))?
     var followRate: () -> FrameRate = { .fps30 }
@@ -215,6 +222,7 @@ final class ControlCenter: ObservableObject {
             let messages = OSCMessage.parse(data)
             Task { @MainActor in
                 for m in messages {
+                    if let go = DeskGo.from(m) { self?.onDeskGo?(go); continue }
                     guard let cmd = RemoteCommand.from(m) else { continue }
                     self?.run(cmd, from: "OSC \(m.address) from \(from)")
                 }
@@ -231,7 +239,29 @@ final class ControlCenter: ObservableObject {
 
     // MARK: MIDI in
 
+    /// Listens for MIDI Show Control over the network while recording from the desk (MIDI
+    /// itself is always heard). Only while armed, so nothing listens when it isn't wanted.
+    func listenForDesk(_ on: Bool) {
+        mscIn = nil
+        guard on else { deskStatus = ""; return }
+        guard let socket = UDPSocket(listenOn: settings.mscPort) else {
+            deskStatus = "Port \(settings.mscPort) is in use: MIDI Show Control over the network can't be heard. OSC and MIDI still work."
+            return
+        }
+        socket.listen(on: netQueue) { [weak self] data, _ in
+            guard let go = DeskGo.from(msc: data) else { return }
+            Task { @MainActor in self?.onDeskGo?(go) }
+        }
+        mscIn = socket
+        deskStatus = "Listening on port \(settings.mscPort)"
+    }
+
     private func midiMessage(_ m: [UInt8]) {
+        // A GO in MIDI Show Control (Record from the desk).
+        if m.first == 0xF0, let go = DeskGo.from(msc: m) {
+            onDeskGo?(go)
+            return
+        }
         // MIDI timecode (for following).
         if settings.follow == .mtc, m.first == 0xF1 || (m.count >= 10 && m[0] == 0xF0 && m[3] == 0x01) {
             if let tc = mtcReader.receive(m) { received(tc, at: CACurrentMediaTime()) }

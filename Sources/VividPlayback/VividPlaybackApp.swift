@@ -97,6 +97,9 @@ struct PlaybackCommands: Commands {
                 .disabled(typing || model.locked || model.screen != .timeline)
             Button("New Trigger Lane…") { model.newLane() }
                 .disabled(model.locked || model.show == nil)
+            Button(model.recordingFromDesk ? "Stop Recording from the Desk" : "Record GOs from the Desk") { model.toggleDeskRecording() }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(model.show == nil || (model.locked && !model.recordingFromDesk))
             Button("Import Labels to Console…") { model.labelsShown = true }
                 .disabled(model.show == nil)
             Menu("Copy Trigger Lanes From") {

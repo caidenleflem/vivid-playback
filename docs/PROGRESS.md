@@ -411,3 +411,21 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   own value is kept as it was (never changed silently). A song with only a timecode file plays
   for as long as that file.
 - 101 tests pass.
+
+## 2026-11-11: record from the desk
+
+- Record desk (timeline top bar, or ⇧⌘R): while armed and playing, every GO from the desk lands as a
+  trigger on the lane for its executor, at the position you hear. An executor with no lane yet gets
+  one. A GO within 8 frames of a trigger the lane already has is ignored (the desk echoing a
+  trigger the app just fired, or a double press). The cue number, when sent, names the trigger.
+  ⌘Z takes back recorded triggers.
+- Inputs (core `DeskGo`, tested): OSC `/vivid/exec` with "1.201", "201", or page and executor as
+  numbers, optional cue after (on a grandMA3: `SendOSC 1 "/vivid/exec,s,1.201"`); MIDI Show Control
+  GO from MIDI, or from the network on UDP 6004 while armed (the MSC message is found inside any
+  header the desk puts in front). The MSC cue list is read as the executor; "a.b" is tried as
+  page.executor and executor.page.
+- `/vivid/go` stays Play.
+- **Needs a check on the desk:** what the grandMA3 puts in the MSC cue list on GO, and its
+  MSC-over-network packet.
+- Export to the desk (timecode show) is waiting on one exported timecode XML from the desk: the
+  file format isn't published, and the pages describing it are blocked from the build session.

@@ -212,6 +212,7 @@ final class AppModel: ObservableObject {
         }
         control.followRate = { [weak self] in self?.show?.defaultRate ?? .fps30 }
         control.onTriggerSettingsChange = { [weak self] in self?.syncTriggers() }
+        control.onDeskGo = { [weak self] go in self?.deskGo(go) }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .magnify]) { [weak self] event in
             guard let self else { return event }
             return self.handle(event) ? nil : event
@@ -873,13 +874,20 @@ final class AppModel: ObservableObject {
     /// `lane` at that point in the song: double-clicking a lane).
     @discardableResult
     func addTrigger(on target: TriggerLane? = nil, at seconds: Double? = nil) -> Marker? {
-        guard screen == .timeline, !locked, let song = currentSong else { return nil }
+        guard screen == .timeline, !locked, currentSong != nil else { return nil }
         guard let lane = target ?? selectedLane else { newLane(); return nil }
+        return insertTrigger(on: lane, at: seconds ?? transport.position())
+    }
+
+    /// A trigger on `lane` in the current song, `seconds` from its start (any screen).
+    @discardableResult
+    private func insertTrigger(on lane: TriggerLane, at seconds: Double, label: String? = nil) -> Marker? {
+        guard !locked, let song = currentSong else { return nil }
         rememberMarkers(of: song)
         selectedLaneID = lane.id
-        let tc = timecode(for: song, at: max(0, seconds ?? transport.position()))
+        let tc = timecode(for: song, at: max(0, seconds))
         let count = song.markers.filter { $0.laneID == lane.id }.count + 1
-        let marker = Marker(time: tc, label: lane.action == .fader ? "Level" : "\(lane.action.label) \(count)",
+        let marker = Marker(time: tc, label: label ?? (lane.action == .fader ? "Level" : "\(lane.action.label) \(count)"),
                             laneID: lane.id, value: lane.action == .fader ? 100 : nil)
         withAnimation(.vivid(0.35)) {
             edit { show in
@@ -929,6 +937,51 @@ final class AppModel: ObservableObject {
     func fireLane(_ lane: TriggerLane) {
         control.triggers.fire(lane: lane, marker: nil)
         control.flash(nil, lane: lane.id)
+    }
+
+    // MARK: Record from the desk
+
+    /// Armed: every GO from the desk (OSC /vivid/exec, or MIDI Show Control) lands as a trigger on
+    /// that executor's lane, at the frame you hear, while the song plays.
+    @Published private(set) var recordingFromDesk = false
+    /// The last GO heard from the desk, and what became of it.
+    @Published private(set) var lastDeskGo: (text: String, at: Date)?
+
+    func toggleDeskRecording() {
+        guard !locked || recordingFromDesk else { return }
+        recordingFromDesk.toggle()
+        control.listenForDesk(recordingFromDesk)
+        if recordingFromDesk {
+            let osc = control.settings.oscIn ? "OSC /vivid/exec on port \(control.settings.oscPort)" : "OSC (turn on OSC in under Connections)"
+            post("Recording GOs from the desk: \(osc), and MIDI Show Control over MIDI or port \(control.settings.mscPort). Play a song and fire away.")
+        }
+    }
+
+    func deskGo(_ go: DeskGo) {
+        let from = "\(go.source.rawValue) GO \(go.label)\(go.cue.map { " cue \($0)" } ?? "")"
+        guard recordingFromDesk else { lastDeskGo = ("\(from) · not recording", Date()); return }
+        guard !locked, currentSong != nil else { lastDeskGo = ("\(from) · nothing cued", Date()); return }
+        guard transport.isPlaying else { lastDeskGo = ("\(from) · play the song to record it", Date()); return }
+        // Where the music was when the GO arrived (the position you hear).
+        let seconds = transport.position()
+        var lane = DeskRecorder.lane(for: go, in: lanes)
+        if lane == nil {
+            // An executor with no lane yet gets one.
+            let made = TriggerLane(page: go.page ?? 1, executor: go.executor, color: lanes.count % 6,
+                                   key: TriggerLane.freeKey(in: lanes))
+            saveLane(made)
+            lane = made
+        }
+        guard let lane, let fresh = currentSong else { return }
+        let frame = timecode(for: fresh, at: max(0, seconds)).frames(since: fresh.start)
+        let existing = fresh.markers.filter { $0.laneID == lane.id }.map { $0.time.frames(since: fresh.start) }
+        if DeskRecorder.isDuplicate(frame: frame, existing: existing) {
+            lastDeskGo = ("\(from) · already on \(lane.title) here", Date())
+            return
+        }
+        guard let marker = insertTrigger(on: lane, at: seconds, label: go.cue.map { "Cue \($0)" }) else { return }
+        control.flash(marker.id, lane: lane.id)
+        lastDeskGo = ("\(from) → \(lane.title) at \(marker.time)", Date())
     }
 
     // MARK: Import labels to console
@@ -1637,6 +1690,7 @@ final class AppModel: ObservableObject {
         var demoZoom = false
         var demoAddAlbum = false
         var demoLabels = false
+        var demoRecord = false
         let target: Screen
         switch name {
         case "library": target = .library
@@ -1649,6 +1703,7 @@ final class AppModel: ObservableObject {
         case "player": target = .player
         case "add-album": target = .albums; demoAddAlbum = true
         case "labels": target = .timeline; demoLabels = true
+        case "record": target = .timeline; demoRecord = true
         default: return
         }
         if target == .connections {
@@ -1659,6 +1714,7 @@ final class AppModel: ObservableObject {
         let zoomIn = demoZoom
         let addAlbumSheet = demoAddAlbum
         let labelsSheet = demoLabels
+        let recordArmed = demoRecord
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vivid Playback Example Tour 2027")
         let reader = self.reader
         Task {
@@ -1717,6 +1773,10 @@ final class AppModel: ObservableObject {
             }
             screen = target
             if !zoomIn { transport.play() }
+            if recordArmed {
+                toggleDeskRecording()
+                lastDeskGo = ("OSC GO 1.201 cue 3 → Main cues at 03:00:11:00", Date())
+            }
             if labelsSheet {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 labelsShown = true
