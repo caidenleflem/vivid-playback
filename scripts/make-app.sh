@@ -11,7 +11,8 @@ APP="build/Vivid Playback.app"
 
 echo "Building Vivid Playback ${VERSION}..."
 # Universal (Apple silicon and Intel) when the full Xcode toolchain is there; this Mac's chip otherwise.
-if swift build -c release --product VividPlayback --arch arm64 --arch x86_64 >/dev/null 2>&1; then
+# UNIVERSAL=0 builds for this Mac's chip only (quicker, for building on the show Mac).
+if [ "${UNIVERSAL:-1}" != "0" ] && swift build -c release --product VividPlayback --arch arm64 --arch x86_64 >/dev/null 2>&1; then
   BIN="$(swift build -c release --product VividPlayback --arch arm64 --arch x86_64 --show-bin-path)"
 else
   swift build -c release --product VividPlayback

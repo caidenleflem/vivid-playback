@@ -540,3 +540,13 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   `Label Page {page}.{exec} "{name}"` (a Mac still on the old built-in default moves to the new
   one; a template Caiden wrote is left alone), and the examples on screen match. Custom commands
   are his own text and aren't changed.
+
+## 2026-11-11: build on Caiden's Mac
+
+- GitHub's queue for a free Mac ran past 7 minutes, so Caiden builds on his own Mac:
+  `scripts/build-here.sh` (run it straight from GitHub with curl) pulls the newest `main` into
+  `~/Library/Caches/VividPlayback-build`, builds for this Mac's chip only (`UNIVERSAL=0` in
+  `make-app.sh`), replaces the app in Applications and opens it. Only Apple's Command Line Tools
+  are needed (it offers to install them). Later builds only compile what changed.
+- This cloud session can't reach his Mac: the VividPlayback folder is in his Remote Control list
+  but isn't offered to cloud sessions.
