@@ -3,7 +3,8 @@ import QuartzCore
 import PlaybackCore
 
 /// HH:MM:SS:FF with every digit in a fixed-width cell, so nothing shifts as it counts.
-struct ClockText: View {
+/// Equatable: a clock ticking at 60 Hz only redraws when the frame it shows changes.
+struct ClockText: View, Equatable {
     let timecode: Timecode?
     let size: CGFloat
     var weight: Font.Weight = .light
@@ -50,23 +51,25 @@ struct LiveClock: View {
                 let tc = (songTime || !song.hasTimecode)
                     ? Timecode(frameCount: Int(max(0, position) * song.rate.framesPerSecond), rate: song.rate)
                     : transport.outputTimecode(for: song)
-                ClockText(timecode: tc, size: size, weight: weight, color: color)
+                ClockText(timecode: tc, size: size, weight: weight, color: color).equatable()
             } else {
-                ClockText(timecode: nil, size: size, weight: weight, color: Brand.graphite)
+                ClockText(timecode: nil, size: size, weight: weight, color: Brand.graphite).equatable()
             }
         }
         .animation(.easeInOut(duration: 0.4), value: transport.isPlaying)
     }
 }
 
-/// Elapsed and remaining for the current song, and a progress fraction.
+/// Elapsed and remaining for the current song, and a progress fraction. Updates `rate` times a
+/// second while rolling (a progress line and seconds don't need more).
 struct SongProgress<Content: View>: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
+    var rate: Double = 10
     @ViewBuilder var content: (_ position: Double, _ length: Double) -> Content
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !transport.isPlaying)) { _ in
+        TimelineView(.animation(minimumInterval: 1.0 / rate, paused: !transport.isPlaying)) { _ in
             let length = model.currentSong?.length ?? 0
             content(min(transport.position(at: CACurrentMediaTime()), max(length, 0)), length)
         }

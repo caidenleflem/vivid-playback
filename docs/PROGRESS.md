@@ -379,3 +379,7 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   following, the last trigger sent; the follow status only publishes when it changes. The
   Connections page reads those on its own timer.
 - CI records CPU for the app and the window server on each screen while playing.
+- Big clocks are equatable (redrawn only when the frame shown changes); progress lines and
+  "starts in" update 10 times a second. CI, playing, app CPU before → after: Now playing 45 → 35%
+  (first pass), Timeline 44 → 31%, Connections 78 → 56%, Labels sheet 71 → 37%; window server
+  roughly halved. (CI Macs have no GPU, so real Macs use less.)
