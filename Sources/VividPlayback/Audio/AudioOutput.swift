@@ -2,24 +2,68 @@ import Foundation
 import AVFoundation
 import AudioToolbox
 import QuartzCore
+import os
 import PlaybackCore
 
-/// What the audio thread reads and writes. Word-sized fields only; the main thread writes
-/// `pendingLocate` and the settings, the audio thread writes the position. On Apple hardware
-/// aligned word loads and stores don't tear, which is all this needs.
+/// What the audio thread reads and writes.
+///
+/// Song switches go through one lock so they land whole: the new song, where it starts and
+/// whether it plays are taken together at the start of an audio block, never half of one with
+/// half of the other. The main thread holds the lock for a few instructions; the audio thread
+/// only ever tries it (if it's busy, it takes the switch on the next block), so it never waits.
+///
+/// The rest are word-sized fields: the main thread writes the settings, the audio thread writes
+/// the position. On Apple hardware aligned word loads and stores don't tear.
 final class RenderState: @unchecked Sendable {
-    var buffers: PlaybackBuffers?
-    var playing = false
-    var position = 0
-    /// Set by the main thread to move the playhead; taken by the audio thread at its next block.
-    var pendingLocate = -1
+    private let lock: UnsafeMutablePointer<os_unfair_lock> = {
+        let l = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
+        l.initialize(to: os_unfair_lock())
+        return l
+    }()
+
+    // Written by the main thread under the lock; taken by the audio thread.
+    /// Whether the song plays (main thread's view; the audio thread follows at its next block).
+    private(set) var playing = false
+    /// Where the playhead is about to jump to (a frame), or -1. Readable from any thread.
+    private(set) var pendingLocate = -1
+    private(set) var loop: LoopRegion?
+    private var pendingSwitch = false
+    private var pendingBuffers: PlaybackBuffers?
+    private var pendingFade = false
+    private var pendingLocateFade = false
+    private var armedNext: Arm?
+
+    /// The song to run straight into when `after` ends. `serial` tells arms apart, so the same
+    /// song twice in a row still plays twice, once.
+    final class Arm {
+        let after: PlaybackBuffers
+        let next: PlaybackBuffers
+        let serial: Int
+        init(after: PlaybackBuffers, next: PlaybackBuffers, serial: Int) {
+            self.after = after
+            self.next = next
+            self.serial = serial
+        }
+    }
+
+    // Owned by the audio thread.
+    private var head = Playhead()
+    private var appliedPlaying = false
+    private var appliedLoop: LoopRegion?
+    private var armSerial = 0
+    private var usedSerial = 0
+    var fadeFrames = 384
+
+    // Written by the audio thread; read anywhere.
     var map = OutputMap(channelCount: 2, masterLeft: 0, masterRight: 1, timecode: nil)
     var masterGain: Float = 1
     var timecodeGain: Float = 0.5
-    var loop: LoopRegion?
     /// The position after the last block, and when that block was rendered.
     var renderedPosition = 0
     var renderedAt: Double = 0
+    /// Counts each time the audio thread ran on into the armed song, and which arm that was.
+    private(set) var advances = 0
+    private(set) var advancedSerial = 0
     /// Peak level per output channel since the meters last read it (the UI resets it).
     let peaks: UnsafeMutablePointer<Float> = {
         let p = UnsafeMutablePointer<Float>.allocate(capacity: 64)
@@ -29,6 +73,102 @@ final class RenderState: @unchecked Sendable {
     /// Test timecode for line checks: sent on the timecode output only, while stopped.
     var test: PlaybackBuffers?
     var testPosition = 0
+
+    // MARK: Main thread
+
+    private func control(_ body: () -> Void) {
+        os_unfair_lock_lock(lock)
+        body()
+        os_unfair_lock_unlock(lock)
+    }
+
+    func setPlaying(_ on: Bool) { control { playing = on } }
+
+    func setLoop(_ region: LoopRegion?) { control { loop = region } }
+
+    /// Moves the playhead. While playing, what was sounding fades out under the jump.
+    func locate(_ frame: Int, fade: Bool) {
+        control {
+            pendingLocate = max(0, frame)
+            pendingLocateFade = fade
+        }
+        renderedPosition = max(0, frame)
+        renderedAt = CACurrentMediaTime()
+    }
+
+    /// Switches song in one step: the buffers, the start frame and playing or not land together.
+    /// With `fade`, the song that was playing fades out underneath instead of stopping dead.
+    func cut(to buffers: PlaybackBuffers?, at frame: Int, playing on: Bool, fade: Bool) {
+        control {
+            pendingSwitch = true
+            pendingBuffers = buffers
+            pendingFade = fade
+            pendingLocate = max(0, frame)
+            playing = on
+            loop = nil
+            armedNext = nil
+        }
+        renderedPosition = max(0, frame)
+        renderedAt = CACurrentMediaTime()
+    }
+
+    /// Arms `next` to follow `after` without a gap, or disarms with nil.
+    func arm(_ next: PlaybackBuffers?, after: PlaybackBuffers?, serial: Int) {
+        control {
+            if let next, let after { armedNext = Arm(after: after, next: next, serial: serial) } else { armedNext = nil }
+        }
+    }
+
+    // MARK: Audio thread
+
+    /// Renders one block. Realtime-safe: no allocation, no waiting.
+    func render(into outputs: UnsafeBufferPointer<UnsafeMutablePointer<Float>?>, frames: Int) {
+        if os_unfair_lock_trylock(lock) {
+            if pendingSwitch {
+                let fade = pendingFade && appliedPlaying ? fadeFrames : 0
+                head.cut(to: pendingBuffers, at: max(0, pendingLocate), fade: fade)
+                pendingSwitch = false
+                pendingBuffers = nil
+                pendingLocate = -1
+            } else if pendingLocate >= 0 {
+                // A jump within the song: what was sounding fades out under it while playing.
+                head.cut(to: head.buffers, at: pendingLocate, fade: pendingLocateFade && appliedPlaying ? fadeFrames : 0)
+                pendingLocate = -1
+            }
+            pendingLocateFade = false
+            appliedPlaying = playing
+            appliedLoop = loop
+            if let a = armedNext, a.serial > usedSerial, a.after === head.buffers {
+                head.next = a.next
+                armSerial = a.serial
+            } else {
+                head.next = nil
+            }
+            os_unfair_lock_unlock(lock)
+        }
+        if appliedPlaying {
+            let before = head.advances
+            Mixer.render(&head, frames: frames, into: outputs, map: map, masterGain: masterGain,
+                         timecodeGain: timecodeGain, loop: appliedLoop)
+            if head.advances != before {
+                usedSerial = armSerial
+                advancedSerial = armSerial
+                advances &+= 1
+            }
+        } else if let test {
+            head.endFade()
+            // Line check: timecode only, never the music, looping.
+            testPosition = Mixer.render(test, position: testPosition, frames: frames, into: outputs,
+                                        map: map, masterGain: 0, timecodeGain: timecodeGain,
+                                        loop: LoopRegion(start: 0, end: test.frameCount))
+        } else {
+            head.endFade()
+            for p in outputs { p?.update(repeating: 0, count: frames) }
+        }
+        Mixer.peaks(outputs, frames: frames, into: peaks, count: min(64, outputs.count))
+        renderedPosition = head.position
+        renderedAt = CACurrentMediaTime()
+    }
 }
 
 enum AudioOutputError: Error, CustomStringConvertible {
@@ -84,32 +224,13 @@ final class AudioOutput {
 
         let state = self.state
         state.map.channelCount = channelCount
+        state.fadeFrames = Mixer.cutFadeFrames(sampleRate: sampleRate)
         let node = AVAudioSourceNode(format: format) { _, _, frameCount, bufferList -> OSStatus in
             let list = UnsafeMutableAudioBufferListPointer(bufferList)
             let frames = Int(frameCount)
             withUnsafeTemporaryAllocation(of: UnsafeMutablePointer<Float>?.self, capacity: list.count) { pointers in
                 for i in 0..<list.count { pointers[i] = list[i].mData?.assumingMemoryBound(to: Float.self) }
-                let outputs = UnsafeBufferPointer(pointers)
-                let jump = state.pendingLocate
-                if jump >= 0 {
-                    state.position = jump
-                    state.pendingLocate = -1
-                }
-                if state.playing {
-                    state.position = Mixer.render(state.buffers, position: state.position, frames: frames, into: outputs,
-                                                  map: state.map, masterGain: state.masterGain,
-                                                  timecodeGain: state.timecodeGain, loop: state.loop)
-                } else if let test = state.test {
-                    // Line check: timecode only, never the music, looping.
-                    state.testPosition = Mixer.render(test, position: state.testPosition, frames: frames, into: outputs,
-                                                      map: state.map, masterGain: 0, timecodeGain: state.timecodeGain,
-                                                      loop: LoopRegion(start: 0, end: test.frameCount))
-                } else {
-                    for p in outputs { p?.update(repeating: 0, count: frames) }
-                }
-                Mixer.peaks(outputs, frames: frames, into: state.peaks, count: min(64, outputs.count))
-                state.renderedPosition = state.position
-                state.renderedAt = CACurrentMediaTime()
+                state.render(into: UnsafeBufferPointer(pointers), frames: frames)
             }
             return noErr
         }
@@ -132,7 +253,7 @@ final class AudioOutput {
     }
 
     func stop() {
-        state.playing = false
+        state.setPlaying(false)
         if engine.isRunning { engine.stop() }
         if let source { engine.detach(source) }
         source = nil

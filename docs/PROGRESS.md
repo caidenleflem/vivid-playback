@@ -429,3 +429,34 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   MSC-over-network packet.
 - Export to the desk (timecode show) is waiting on one exported timecode XML from the desk: the
   file format isn't published, and the pages describing it are blocked from the build session.
+
+## 2026-11-11: instant song switches
+
+- **The whole set stays loaded.** When a show opens, every song loads into memory in the
+  background, in set order from the playing song (then the songs before it, then the rest of the
+  album). Picking any song, Next, Previous, a desk command or following timecode now switches on
+  the next audio block, with no loading. Up to half the Mac's memory is used (about 140 MB for
+  four minutes of stereo plus timecode at 48 kHz). If the set doesn't fit, the songs from the
+  playing one on are kept and a chip says how many load when cued. While loading, a quiet chip
+  shows "Getting the set ready · 6 of 22". Playback is fine meanwhile.
+- **Songs run straight into each other.** With auto-advance on, the next song is armed on the
+  audio thread and starts on the exact sample after the last one ends, master and timecode
+  together. Before, a 50 ms timer noticed the end, stopped, then started the next song, which
+  left a gap. The screen, the network timecode (MTC, Art-Net) and the triggers follow the new song
+  at once, even in the few milliseconds before the screen catches up. Looping, stop after each,
+  and the end of the set still stop as before.
+- **Cuts don't click.** Switching song mid-song, or jumping in a song while playing, crossfades
+  the master over 8 ms. The two never add up past full level. The timecode never fades: the new
+  song's timecode is out on the first sample. Stopping drops any fade that's left.
+- **A switch lands whole.** The new song, where it starts and whether it plays go to the audio
+  thread together, through a lock that the audio thread only ever tries (never waits on). A
+  switch can no longer play one block of the new song at the old position.
+- **No stale audio.** A loaded song is used only while its files, start, offset, rate and
+  timecode channel still match (core `Song.audioKey`). Change any of them and it reloads.
+- Core: `Playhead` and `Mixer.render(&playhead…)` (run-on, crossfade), `SetMemory` (order,
+  budget, what fits), `Song.audioKey`. 125 tests pass.
+- Checked on Linux: the transport, clock and audio state compile against stubs, and a simulated
+  three-song set played through the real transport code ran on with zero gap samples, with the
+  timecode switching on the same sample as the master.
+- **Needs a check on the Mac:** auto-advance between two real songs, a mid-song switch on a loud
+  master (no click), and memory use with a full set loaded (Activity Monitor).

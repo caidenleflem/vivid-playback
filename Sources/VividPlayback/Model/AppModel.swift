@@ -121,12 +121,13 @@ final class AppModel: ObservableObject {
     @Published var screen: Screen = .firstRun
     /// The screen before the last move (decides how a page comes in).
     private(set) var previousScreen: Screen = .firstRun
-    @Published var show: Show? { didSet { syncTriggers() } }
+    @Published var show: Show? { didSet { syncTriggers(); keepSetReady() } }
     @Published var packageURL: URL?
     @Published var issues: [ShowIssue] = []
     @Published var currentSongID: UUID? {
         didSet {
             syncTriggers()
+            keepSetReady()
             if currentSongID != oldValue {
                 selectedMarkerIDs = []
                 timelineWindow = TimelineWindow(length: currentSong?.playLength ?? 1)
@@ -166,7 +167,7 @@ final class AppModel: ObservableObject {
     @Published var setlistEditorShown = false
     @Published var goToShown = false
     @Published var markerEdit: MarkerEdit?
-    @Published var selectedSetlistID: UUID?
+    @Published var selectedSetlistID: UUID? { didSet { keepSetReady() } }
     /// Show mode: playback only, nothing can be edited.
     @Published var locked = false
     @Published var stopAfterEach = UserDefaults.standard.bool(forKey: "stopAfterEach") {
@@ -204,6 +205,11 @@ final class AppModel: ObservableObject {
 
     init() {
         transport.onSongEnd = { [weak self] in self?.advanceAfterSongEnd() }
+        transport.wantedNext = { [weak self] in
+            guard let self, !self.stopAfterEach else { return nil }
+            return self.nextSong
+        }
+        transport.onAdvance = { [weak self] song in self?.ranOn(into: song) }
         control.onCommand = { [weak self] in self?.handle($0) }
         control.onFollow = { [weak self] in self?.follow($0) }
         control.followContext = { [weak self] in
@@ -581,8 +587,30 @@ final class AppModel: ObservableObject {
         guard let show else { return }
         currentSongID = song.id
         transport.load(song, in: show, play: play, at: position)
-        transport.preload(nextSong, in: show)
         loadWaveform(for: song)
+    }
+
+    /// The audio ran straight on into the next song (no gap): the screen catches up with it.
+    private func ranOn(into song: Song) {
+        guard let show else { return }
+        currentSongID = song.id
+        if let fresh = show.song(id: song.id) { transport.update(fresh, in: show) }
+        loadWaveform(for: song)
+    }
+
+    private var keepReadyQueued = false
+    /// Hands the transport the set in the order it's needed, so every song is in memory and
+    /// switching to it is instant. Batched: many changes in one moment hand it over once.
+    func keepSetReady() {
+        guard !keepReadyQueued else { return }
+        keepReadyQueued = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.keepReadyQueued = false
+            guard let show = self.show else { return }
+            let order = SetMemory.order(queue: self.queue.map(\.id), all: show.songs.map(\.id), current: self.currentSong?.id)
+            self.transport.keepReady(order.compactMap(show.song(id:)), in: show)
+        }
     }
 
     /// Double-click in the song list: play this song from its top. The song already playing
@@ -1402,6 +1430,7 @@ final class AppModel: ObservableObject {
     private func filesChanged(_ changed: Song? = nil) {
         guard let show else { return }
         transport.invalidateCache()
+        keepSetReady()
         waveforms = [:]
         if let song = currentSong {
             if transport.isPlaying {
@@ -1607,6 +1636,7 @@ final class AppModel: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         edit { $0.mediaFolder = url.standardizedFileURL.path }
         transport.invalidateCache()
+        keepSetReady()
         waveforms = [:]
         if let song = currentSong { cue(song, play: false) }
         recheck()
@@ -1620,6 +1650,7 @@ final class AppModel: ObservableObject {
         self.selectedSetlistID = show.setlists.first?.id
         waveforms = [:]
         transport.invalidateCache()
+        keepSetReady()
         transport.configure(routing: show.routing)
         if let first = queue.first { cue(first, play: false) }
         UserDefaults.standard.set(package.path, forKey: "lastShowPath")

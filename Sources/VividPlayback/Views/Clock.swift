@@ -99,6 +99,13 @@ struct StateChips: View {
                 }
                 .help(control.followStatus)
             }
+            if transport.audio.isRunning, transport.readyCount < transport.readyTotal {
+                Chip("Getting the set ready · \(transport.readyCount) of \(transport.readyTotal)") { StatusDot(color: Brand.graphite) }
+                    .help("Songs load into memory in set order so every switch is instant. Playback is fine meanwhile.")
+            } else if transport.audio.isRunning, transport.notKept > 0 {
+                Chip("\(transport.readyTotal) songs ready · \(transport.notKept) load when cued") { StatusDot(color: Brand.warn) }
+                    .help("This Mac doesn't have the memory to keep every song ready. The set from the playing song on is ready; the others take a moment to load when you pick them.")
+            }
             if let problem = transport.masterProblem {
                 Chip("Master can't be read") { StatusDot(color: Color(hex: 0xE5675A)) }.help(problem)
             }

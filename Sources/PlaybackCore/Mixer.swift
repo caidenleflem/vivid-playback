@@ -97,6 +97,8 @@ public final class PlaybackBuffers: @unchecked Sendable {
     }
 
     public var duration: Double { Double(frameCount) / sampleRate }
+    /// Memory the song takes while loaded.
+    public var byteCount: Int { frameCount * (masterChannels + (timecode == nil ? 0 : 1)) * MemoryLayout<Float>.size }
 
     public func masterSample(channel: Int, frame: Int) -> Float { master[min(channel, masterChannels - 1) * frameCount + frame] }
     public func timecodeSample(frame: Int) -> Float { timecode?[frame] ?? 0 }
@@ -127,30 +129,148 @@ public enum Mixer {
         for out in outputs {
             out?.update(repeating: 0, count: frames)
         }
+        return add(buffers, position: position, frames: frames, at: 0, into: outputs, map: map,
+                   masterGain: masterGain, timecodeGain: timecodeGain, loop: loop)
+    }
+
+    /// Renders a block for a playhead: the song, then, the sample it ends, the song armed after
+    /// it (no gap, timecode and master together). Just after a cut, the master crossfades from
+    /// the song cut away from in a few milliseconds, so it doesn't click. The fade never touches
+    /// the timecode output: the new song's timecode starts on the first sample.
+    /// Allocation-free, for the realtime audio thread.
+    public static func render(_ head: inout Playhead, frames: Int,
+                              into outputs: UnsafeBufferPointer<UnsafeMutablePointer<Float>?>,
+                              map: OutputMap, masterGain: Float, timecodeGain: Float,
+                              loop: LoopRegion? = nil) {
+        for out in outputs {
+            out?.update(repeating: 0, count: frames)
+        }
+        var done = 0
+        while done < frames {
+            var n = frames - done
+            if loop == nil, let b = head.buffers, let next = head.next {
+                let left = b.frameCount - head.position
+                if left <= 0 {
+                    head.buffers = next
+                    head.position = 0
+                    head.next = nil
+                    head.advances &+= 1
+                    continue
+                }
+                n = min(n, left)
+            }
+            head.position = add(head.buffers, position: head.position, frames: n, at: done, into: outputs, map: map,
+                                masterGain: masterGain, timecodeGain: timecodeGain, loop: loop)
+            done += n
+        }
+        if head.fadeLeft > 0, let tail = head.tail, head.fadeLength > 0 {
+            // A crossfade on the master only: the new song rises as the old one falls, so the two
+            // never add up past full level. The timecode output isn't touched.
+            let n = min(frames, head.fadeLeft)
+            let length = Float(head.fadeLength)
+            let into = Float(head.fadeLength - head.fadeLeft)
+            let left = map.masterLeft.flatMap { $0 < outputs.count ? outputs[$0] : nil }
+            var right = map.masterRight.flatMap { $0 < outputs.count ? outputs[$0] : nil }
+            if right == left { right = nil }
+            if let left { for i in 0..<n { left[i] *= (into + Float(i)) / length } }
+            if let right { for i in 0..<n { right[i] *= (into + Float(i)) / length } }
+            let step = masterGain / length
+            head.tailPosition = add(tail, position: head.tailPosition, frames: n, at: 0, into: outputs, map: map,
+                                    masterGain: Float(head.fadeLeft) * step, timecodeGain: 0, rampStep: step,
+                                    includeTimecode: false)
+            head.fadeLeft -= n
+        }
+        if head.fadeLeft <= 0 { head.tail = nil }
+    }
+
+    /// Adds `frames` frames of `buffers` from `position` into the outputs starting at output frame
+    /// `offset`, and returns the next position. With `rampStep`, the master gain falls by that much
+    /// each frame (a fade-out).
+    @inline(__always)
+    static func add(_ buffers: PlaybackBuffers?, position: Int, frames: Int, at offset: Int,
+                    into outputs: UnsafeBufferPointer<UnsafeMutablePointer<Float>?>,
+                    map: OutputMap, masterGain: Float, timecodeGain: Float, loop: LoopRegion? = nil,
+                    rampStep: Float = 0, includeTimecode: Bool = true) -> Int {
         guard let b = buffers else { return position }
         let left = map.masterLeft.flatMap { $0 < outputs.count ? outputs[$0] : nil }
-        let right = map.masterRight.flatMap { $0 < outputs.count ? outputs[$0] : nil }
-        let tc = map.timecode.flatMap { $0 < outputs.count ? outputs[$0] : nil }
+        var right = map.masterRight.flatMap { $0 < outputs.count ? outputs[$0] : nil }
+        if right == left { right = nil }   // both sides on one output: summed, never doubled
+        let tc = includeTimecode ? map.timecode.flatMap { $0 < outputs.count ? outputs[$0] : nil } : nil
         let rightSource = b.masterChannels > 1 ? b.frameCount : 0
         // The master on a single output (a two-output laptop: music left, timecode right) is
         // summed to mono so nothing is lost.
         let monoSum = right == nil && b.masterChannels > 1
+        var gain = masterGain
         var pos = position
-        var i = 0
-        while i < frames {
+        var i = offset
+        let end = offset + frames
+        while i < end {
             if let loop, loop.end > loop.start, pos >= loop.end { pos = loop.start }
             if pos >= 0 && pos < b.frameCount {
                 let l = b.master[pos]
                 let r = b.master[rightSource + pos]
-                if let left { left[i] = (monoSum ? (l + r) * 0.5 : l) * masterGain }
-                if let right { right[i] = r * masterGain }
-                if let tc, let t = b.timecode { tc[i] = t[pos] * timecodeGain }
+                if let left { left[i] += (monoSum ? (l + r) * 0.5 : l) * gain }
+                if let right { right[i] += r * gain }
+                if let tc, let t = b.timecode { tc[i] += t[pos] * timecodeGain }
             }
+            gain = max(0, gain - rampStep)
             pos += 1
             i += 1
         }
         return pos
     }
+}
+
+/// What the audio thread is playing: the song and where it is, the song it runs straight into
+/// when this one ends (nil: it plays on into silence), and the song it was just cut away from,
+/// crossfading out on the master so the cut doesn't click.
+public struct Playhead {
+    public var buffers: PlaybackBuffers?
+    public var position: Int
+    public var next: PlaybackBuffers?
+    /// Counts each time the playhead ran on into `next`.
+    public var advances: Int = 0
+    var tail: PlaybackBuffers?
+    var tailPosition = 0
+    var fadeLeft = 0
+    var fadeLength = 0
+
+    public init(buffers: PlaybackBuffers? = nil, position: Int = 0, next: PlaybackBuffers? = nil) {
+        self.buffers = buffers
+        self.position = position
+        self.next = next
+    }
+
+    /// Switches to `buffers` at `position` at once. With `fade` frames, the master crossfades
+    /// from what was playing instead of cutting dead; the timecode switches on the first sample.
+    public mutating func cut(to buffers: PlaybackBuffers?, at position: Int, fade: Int) {
+        if fade > 0, let old = self.buffers, self.position >= 0, self.position < old.frameCount {
+            tail = old
+            tailPosition = self.position
+            fadeLength = fade
+            fadeLeft = fade
+        } else if fade <= 0 {
+            tail = nil
+            fadeLeft = 0
+        }
+        self.buffers = buffers
+        self.position = position
+        next = nil
+    }
+
+    /// True while the song cut away from is still fading out.
+    public var isFading: Bool { fadeLeft > 0 && tail != nil }
+
+    /// Drops what's left of a fade (on stop, so it never sounds when play resumes).
+    public mutating func endFade() {
+        tail = nil
+        fadeLeft = 0
+    }
+}
+
+extension Mixer {
+    /// The fade under a cut: long enough not to click, short enough to feel instant.
+    public static func cutFadeFrames(sampleRate: Double) -> Int { max(1, Int(sampleRate * 0.008)) }
 }
 
 extension PlaybackBuffers {

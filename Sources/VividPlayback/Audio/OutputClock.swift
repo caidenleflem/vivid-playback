@@ -16,12 +16,19 @@ final class OutputClock: @unchecked Sendable {
     private var anchorPosition: Double = 0
     private var anchorTime: Double = 0
     private var testStart: Timecode?
+    /// Songs armed to follow, by serial, and the advance count the transport has caught up to:
+    /// once the audio runs into the next song, the clock follows it at once.
+    private var arms: [Int: (song: Song, buffers: PlaybackBuffers)] = [:]
+    private var seenAdvances = 0
 
     init(state: RenderState) { self.state = state }
 
     func update(song: Song?, buffers: PlaybackBuffers?, sampleRate: Double, latency: Double, usesAudio: Bool,
-                clockRunning: Bool, anchorPosition: Double, anchorTime: Double) {
+                clockRunning: Bool, anchorPosition: Double, anchorTime: Double,
+                arms: [Int: (song: Song, buffers: PlaybackBuffers)] = [:], seenAdvances: Int = 0) {
         lock.lock(); defer { lock.unlock() }
+        self.arms = arms
+        self.seenAdvances = seenAdvances
         self.song = song
         self.buffers = buffers
         self.sampleRate = sampleRate
@@ -36,10 +43,17 @@ final class OutputClock: @unchecked Sendable {
         lock.lock(); testStart = start; lock.unlock()
     }
 
+    /// The song being heard: the armed one once the audio has run into it. Call with the lock held.
+    private func heard() -> (Song?, PlaybackBuffers?) {
+        if usesAudio, state.advances != seenAdvances, let a = arms[state.advancedSerial] { return (a.song, a.buffers) }
+        return (song, buffers)
+    }
+
     /// Where the playhead is in the current song (seconds from its start), as heard.
     func position(at time: Double = CACurrentMediaTime()) -> (song: Song?, seconds: Double, running: Bool) {
         lock.lock()
-        let song = self.song, buffers = self.buffers, rate = sampleRate, latency = self.latency
+        let (song, buffers) = heard()
+        let rate = sampleRate, latency = self.latency
         let usesAudio = self.usesAudio, clockRunning = self.clockRunning, anchor = anchorPosition, anchorTime = self.anchorTime
         lock.unlock()
         guard let song else { return (nil, 0, false) }
@@ -58,7 +72,8 @@ final class OutputClock: @unchecked Sendable {
     /// The timecode at this moment, and whether it's running. Nil where nothing is sent.
     func now(at time: Double = CACurrentMediaTime()) -> (timecode: Timecode?, running: Bool) {
         lock.lock()
-        let song = self.song, buffers = self.buffers, rate = sampleRate, latency = self.latency
+        let (song, buffers) = heard()
+        let rate = sampleRate, latency = self.latency
         let usesAudio = self.usesAudio, clockRunning = self.clockRunning, anchor = anchorPosition, anchorTime = self.anchorTime
         let testStart = self.testStart
         lock.unlock()
