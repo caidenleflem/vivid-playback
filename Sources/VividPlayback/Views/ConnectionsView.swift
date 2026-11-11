@@ -125,6 +125,50 @@ extension View {
 
 // MARK: The page
 
+/// Which network port something uses: Automatic (macOS chooses) or one of this Mac's ports.
+/// With a `target` address, says which port Automatic picks, and warns when the target isn't on
+/// the chosen port's network.
+struct NetworkPortPicker: View {
+    @EnvironmentObject private var control: ControlCenter
+    @Binding var selection: String?
+    var target: String? = nil
+    var prefix = "Network"
+
+    var body: some View {
+        let chosen = control.port(selection)
+        let auto = target.flatMap { NetworkPort.port(for: $0, among: control.networkPorts) }
+        VStack(alignment: .leading, spacing: 4) {
+            Menu {
+                Picker("", selection: $selection) {
+                    Text(auto.map { "Automatic · \($0.label) now" } ?? "Automatic").tag(String?.none)
+                    ForEach(control.networkPorts) { p in
+                        Text("\(p.label) · \(p.address)").tag(Optional(p.name))
+                    }
+                    if let s = selection, chosen == nil {
+                        Text("\(control.portLabel(s)) · not connected").tag(Optional(s))
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "network").font(.system(size: 11, weight: .semibold))
+                    Text("\(prefix) · \(selection == nil ? "Automatic" : control.portLabel(selection))")
+                        .font(.manrope(12.5, .semibold)).lineLimit(1)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Which of this Mac's network ports this uses. Automatic lets macOS choose, which can pick Wi-Fi.")
+            if let s = selection, chosen == nil {
+                Text("\(control.portLabel(s)) isn't connected.").font(.manrope(11.5)).foregroundStyle(Brand.warn)
+            } else if let target, let why = NetworkPort.mismatch(host: target, port: chosen) {
+                Text(why).font(.manrope(11.5)).foregroundStyle(Brand.warn).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 struct ConnectionsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
@@ -151,7 +195,7 @@ struct ConnectionsView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo(anchor, anchor: .top) }
                 }
             }
-        .onAppear { control.refreshDevices() }
+        .onAppear { control.refreshDevices(); control.refreshNetworkPorts() }
     }
 
     private var header: some View {
@@ -285,13 +329,19 @@ struct ConnectionsView: View {
                     let (tc, live) = liveOut(on)
                     LiveTimecodeLine(timecode: tc, live: live, idleText: on ? "Ready" : "Off")
                 }
+                NetworkPortPicker(selection: $control.settings.artNetOutPort, target: target, prefix: "Out")
                 HStack(spacing: 8) {
                     Menu {
+                        if let b = control.port(control.settings.artNetOutPort)?.broadcast {
+                            Button("This port's network · \(b)") { control.settings.artNetTarget = b }
+                            Divider()
+                        }
                         Button("Broadcast · 2.255.255.255") { control.settings.artNetTarget = "2.255.255.255" }
                         Button("Broadcast · 10.255.255.255") { control.settings.artNetTarget = "10.255.255.255" }
                         Button("Broadcast · 192.168.1.255") { control.settings.artNetTarget = "192.168.1.255" }
+                        Button("Everything on the port · 255.255.255.255") { control.settings.artNetTarget = "255.255.255.255" }
                     } label: {
-                        Label("Network", systemImage: "antenna.radiowaves.left.and.right").font(.manrope(12.5, .semibold))
+                        Label("Send to", systemImage: "antenna.radiowaves.left.and.right").font(.manrope(12.5, .semibold))
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
@@ -377,6 +427,7 @@ struct ConnectionsView: View {
                                         .textSelection(.enabled)
                                     Text("in a macro or a cue's command (OSC in must be on), or MIDI Show Control out to this Mac (MIDI, or the network on port \(control.settings.mscPort)).")
                                         .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+                                    NetworkPortPicker(selection: $control.settings.mscInPort, prefix: "MIDI Show Control on")
                                 }
                             }
                         }
@@ -443,6 +494,7 @@ struct ConnectionsView: View {
                             .textFieldStyle(.roundedBorder).font(.manrope(13)).frame(width: 70)
                     }
                 }
+                NetworkPortPicker(selection: c.networkPort, target: c.wrappedValue.host.isEmpty ? nil : c.wrappedValue.host)
                 HStack(spacing: 6) {
                     Text("Sends").font(.manrope(11.5, .semibold)).foregroundStyle(Brand.graphite)
                     Text("\(c.wrappedValue.prefix.isEmpty ? "" : "/" + c.wrappedValue.prefix.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")))/cmd \"Go+ Exec 1.201\"")
@@ -524,6 +576,7 @@ struct ConnectionsView: View {
                             Text("Listens on every MIDI input.").font(.manrope(13)).foregroundStyle(Brand.space)
                         case .artNet:
                             Text("Listens for Art-Net timecode on port 6454.").font(.manrope(13)).foregroundStyle(Brand.space)
+                            NetworkPortPicker(selection: $control.settings.artNetInPort, prefix: "Listen on")
                         }
                         if let problem = control.followProblem {
                             Text(problem).font(.manrope(12)).foregroundStyle(Brand.warn).fixedSize(horizontal: false, vertical: true)
@@ -579,9 +632,10 @@ struct ConnectionsView: View {
                     Spacer()
                     Toggle("", isOn: $control.settings.oscIn).toggleStyle(.switch).tint(Brand.gold).labelsHidden()
                 }
+                NetworkPortPicker(selection: $control.settings.oscInPort, prefix: "Listen on")
                 HStack(spacing: 10) {
                     Text("Send to").font(.manrope(12, .semibold)).foregroundStyle(Brand.space)
-                    ForEach(control.addresses.prefix(2), id: \.self) { ip in
+                    ForEach(control.port(control.settings.oscInPort).map { [$0.address] } ?? Array(control.addresses.prefix(2)), id: \.self) { ip in
                         Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(ip, forType: .string) } label: {
                             Text(ip).font(.manrope(12.5, .semibold).monospacedDigit()).foregroundStyle(Brand.ink)
                                 .padding(.horizontal, 10).padding(.vertical, 4)

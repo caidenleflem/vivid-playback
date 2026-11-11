@@ -25,6 +25,12 @@ struct ControlSettings: Codable, Equatable {
     var labelTemplate = ExecutorLabel.defaultTemplate
     /// The UDP port MIDI Show Control arrives on from the network (Record from the desk).
     var mscPort: UInt16 = 6004
+    /// Which network port (its system name, "en7") each protocol uses; nil lets macOS choose.
+    /// Consoles carry their own.
+    var artNetOutPort: String?
+    var oscInPort: String?
+    var artNetInPort: String?
+    var mscInPort: String?
 
     init() {}
 
@@ -49,6 +55,10 @@ struct ControlSettings: Codable, Equatable {
         keysFire = try c.decodeIfPresent(Bool.self, forKey: .keysFire) ?? d.keysFire
         labelTemplate = try c.decodeIfPresent(String.self, forKey: .labelTemplate) ?? d.labelTemplate
         mscPort = try c.decodeIfPresent(UInt16.self, forKey: .mscPort) ?? d.mscPort
+        artNetOutPort = try c.decodeIfPresent(String.self, forKey: .artNetOutPort)
+        oscInPort = try c.decodeIfPresent(String.self, forKey: .oscInPort)
+        artNetInPort = try c.decodeIfPresent(String.self, forKey: .artNetInPort)
+        mscInPort = try c.decodeIfPresent(String.self, forKey: .mscInPort)
     }
 
     static func load() -> ControlSettings {
@@ -136,6 +146,9 @@ final class ControlCenter: ObservableObject {
     private(set) var incomingAt: Double = 0
     @Published private(set) var followStatus = "Off"
     @Published private(set) var followProblem: String?
+    /// This Mac's network ports with an address, looked at again every few seconds.
+    @Published private(set) var networkPorts: [NetworkPort] = UDPSocket.networkPorts()
+    private var portTicks = 0
 
     let midi = MIDIService()
     let sender: TimecodeSender
@@ -204,17 +217,56 @@ final class ControlCenter: ObservableObject {
     private func apply(old: ControlSettings?) {
         if old?.consoles != settings.consoles || old?.fireEarlyMs != settings.fireEarlyMs { onTriggerSettingsChange?() }
         sender.configure(.init(mtc: settings.mtcOut, mtcDestination: settings.mtcDestination,
-                               artNet: settings.artNetOut, artNetTarget: settings.artNetTarget))
-        if old?.oscIn != settings.oscIn || old?.oscPort != settings.oscPort { startOSC() }
-        if old?.follow != settings.follow || old?.ltcInputUID != settings.ltcInputUID || old?.ltcInputChannel != settings.ltcInputChannel {
+                               artNet: settings.artNetOut, artNetTarget: settings.artNetTarget,
+                               artNetPort: settings.artNetOutPort))
+        if old?.oscIn != settings.oscIn || old?.oscPort != settings.oscPort || old?.oscInPort != settings.oscInPort { startOSC() }
+        if old?.follow != settings.follow || old?.ltcInputUID != settings.ltcInputUID || old?.ltcInputChannel != settings.ltcInputChannel
+            || old?.artNetInPort != settings.artNetInPort {
             startFollow()
         }
+        if old?.mscInPort != settings.mscInPort || old?.mscPort != settings.mscPort, mscIn != nil || !deskStatus.isEmpty {
+            listenForDesk(true)
+        }
+    }
+
+    // MARK: Network ports
+
+    /// "USB LAN" for a port's system name, "Automatic" for none.
+    func portLabel(_ name: String?) -> String {
+        guard let name else { return "Automatic" }
+        return networkPorts.first { $0.name == name }?.label ?? name
+    }
+
+    /// The port with this system name, if it's up.
+    func port(_ name: String?) -> NetworkPort? {
+        guard let name else { return nil }
+        return networkPorts.first { $0.name == name }
+    }
+
+    /// Looks at the network ports again. When a chosen port comes or goes, whatever listens on
+    /// it starts again, so a replugged adapter is picked back up without touching anything.
+    func refreshNetworkPorts() {
+        let now = UDPSocket.networkPorts()
+        guard now != networkPorts else { return }
+        let before = Set(networkPorts.map(\.name)), after = Set(now.map(\.name))
+        networkPorts = now
+        let changed = before.symmetricDifference(after)
+        if let p = settings.oscInPort, changed.contains(p) { startOSC() }
+        if let p = settings.artNetInPort, changed.contains(p), settings.follow == .artNet { startFollow() }
+        if let p = settings.mscInPort, changed.contains(p), mscIn != nil || !deskStatus.isEmpty { listenForDesk(true) }
+    }
+
+    /// Why a listener tied to `port` can't start, in plain words.
+    private func unavailable(_ port: String?) -> String? {
+        guard let port, if_nametoindex(port) == 0 || self.port(port) == nil else { return nil }
+        return "\(portLabel(port)) isn't connected. Nothing is heard until it's back."
     }
 
     private func startOSC() {
         osc = nil
         guard settings.oscIn else { oscStatus = "Off"; return }
-        guard let socket = UDPSocket(listenOn: settings.oscPort) else {
+        if let why = unavailable(settings.oscInPort) { oscStatus = why; return }
+        guard let socket = UDPSocket(listenOn: settings.oscPort, networkPort: settings.oscInPort) else {
             oscStatus = "Port \(settings.oscPort) is in use by another app. Choose another port."
             return
         }
@@ -229,7 +281,7 @@ final class ControlCenter: ObservableObject {
             }
         }
         osc = socket
-        oscStatus = "Listening on port \(settings.oscPort)"
+        oscStatus = "Listening on port \(settings.oscPort)" + (settings.oscInPort == nil ? "" : " · \(portLabel(settings.oscInPort))")
     }
 
     private func run(_ cmd: RemoteCommand, from source: String) {
@@ -244,7 +296,11 @@ final class ControlCenter: ObservableObject {
     func listenForDesk(_ on: Bool) {
         mscIn = nil
         guard on else { deskStatus = ""; return }
-        guard let socket = UDPSocket(listenOn: settings.mscPort) else {
+        if let why = unavailable(settings.mscInPort) {
+            deskStatus = "MIDI Show Control over the network: " + why
+            return
+        }
+        guard let socket = UDPSocket(listenOn: settings.mscPort, networkPort: settings.mscInPort) else {
             deskStatus = "Port \(settings.mscPort) is in use: MIDI Show Control over the network can't be heard. OSC and MIDI still work."
             return
         }
@@ -253,7 +309,7 @@ final class ControlCenter: ObservableObject {
             Task { @MainActor in self?.onDeskGo?(go) }
         }
         mscIn = socket
-        deskStatus = "Listening on port \(settings.mscPort)"
+        deskStatus = "Listening on port \(settings.mscPort)" + (settings.mscInPort == nil ? "" : " · \(portLabel(settings.mscInPort))")
     }
 
     private func midiMessage(_ m: [UInt8]) {
@@ -309,7 +365,12 @@ final class ControlCenter: ObservableObject {
         case .mtc:
             followStatus = "Waiting for MIDI timecode"
         case .artNet:
-            guard let socket = UDPSocket(listenOn: ArtNetTimecode.port) else {
+            if let why = unavailable(settings.artNetInPort) {
+                followProblem = why
+                followStatus = "Can't listen"
+                return
+            }
+            guard let socket = UDPSocket(listenOn: ArtNetTimecode.port, networkPort: settings.artNetInPort) else {
                 followProblem = "Art-Net port 6454 is in use by another app on this Mac."
                 followStatus = "Can't listen"
                 return
@@ -361,6 +422,8 @@ final class ControlCenter: ObservableObject {
     }
 
     private func followTick() {
+        portTicks += 1
+        if portTicks % 60 == 0 { refreshNetworkPorts() }   // every 3 seconds
         guard settings.follow != .off, let ctx = followContext?() else { return }
         let actions = chase.tick(at: CACurrentMediaTime(), playing: ctx.playing)
         // Only when it changes: setting a published value redraws everything watching it.

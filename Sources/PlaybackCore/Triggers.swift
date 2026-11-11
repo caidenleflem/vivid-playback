@@ -9,15 +9,18 @@ public struct ConsoleTarget: Codable, Hashable, Identifiable, Sendable {
     public var port: UInt16
     public var prefix: String
     public var enabled: Bool
+    /// The network port (its system name, "en7") the commands go out on; nil lets macOS choose.
+    public var networkPort: String?
 
     public init(id: UUID = UUID(), name: String = "grandMA3", host: String = "", port: UInt16 = 8000,
-                prefix: String = "gma3", enabled: Bool = true) {
+                prefix: String = "gma3", enabled: Bool = true, networkPort: String? = nil) {
         self.id = id
         self.name = name
         self.host = host
         self.port = port
         self.prefix = prefix
         self.enabled = enabled
+        self.networkPort = networkPort
     }
 
     /// "/gma3" (or "" with no prefix).

@@ -21,7 +21,25 @@ final class TriggerService: @unchecked Sendable {
     private var earlySeconds: Double = 0
     private var scheduler = TriggerScheduler()
     private var lastSong: UUID?
-    private let socket = UDPSocket()
+    /// One socket per network port, made as needed (queue only). Key "" is macOS's choice.
+    private var sockets: [String: UDPSocket] = [:]
+
+    /// The socket for a console's network port (queue only). Nil if that port isn't there.
+    private func socket(for console: ConsoleTarget) -> UDPSocket? {
+        let key = console.networkPort ?? ""
+        if let s = sockets[key] { return s }
+        let s = UDPSocket(networkPort: console.networkPort)
+        sockets[key] = s
+        return s
+    }
+
+    /// Sends one message to a console; drops a port's socket that failed so the next send makes
+    /// a fresh one (an adapter unplugged and plugged back in).
+    private func send(_ bytes: [UInt8], to console: ConsoleTarget) -> Bool {
+        let ok = socket(for: console)?.send(bytes, to: console.host, port: console.port) == true
+        if !ok { sockets[console.networkPort ?? ""] = nil }
+        return ok
+    }
     /// Called on the main queue with each fired trigger and its lane.
     var onFire: ((UUID, UUID) -> Void)?
     /// Called on the main queue after each send: what went where, and whether it left this Mac.
@@ -88,7 +106,7 @@ final class TriggerService: @unchecked Sendable {
             var sent = 0, failed = 0
             for item in items {
                 for console in item.consoles {
-                    if self.socket?.send(console.command(item.command).encoded(), to: console.host, port: console.port) == true {
+                    if self.send(console.command(item.command).encoded(), to: console) {
                         sent += 1
                     } else {
                         failed += 1
@@ -102,10 +120,10 @@ final class TriggerService: @unchecked Sendable {
 
     private func send(lane: TriggerLane, marker: Marker?, consoles: [ConsoleTarget]) {
         let targets = lane.targets(in: consoles)
-        var ok = !targets.isEmpty && socket != nil
+        var ok = !targets.isEmpty
         for console in targets {
             for message in lane.messages(for: marker, console: console) {
-                if socket?.send(message.encoded(), to: console.host, port: console.port) != true { ok = false }
+                if !send(message.encoded(), to: console) { ok = false }
             }
         }
         let what = lane.commandLine(for: marker) ?? "Fader \(lane.page).\(lane.executor) at \(Int((marker?.value ?? 100).rounded()))%"

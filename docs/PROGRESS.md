@@ -511,3 +511,24 @@ master and for LTC.
 - Master level goes to +12 dB (was 0). Above 0 dB a limiter on the master bends anything over
   -1 dBFS smoothly so it never clips; at 0 dB or below it isn't in the path. Timecode is never
   touched (core `Mixer.limit`, tested). 138 tests pass.
+
+## 2026-11-11: network port per protocol
+
+Caiden: sending wasn't working, and he wants to pick which network port (NIC) each protocol
+uses. Until now macOS chose for every packet: with Wi-Fi and a wired show network, Art-Net to
+2.255.255.255 and OSC to the console could leave on the wrong port.
+- Every console card, Art-Net out, OSC in (remote), Art-Net in (follow) and MIDI Show Control
+  in (record from the desk) has a **Network** choice: Automatic (macOS chooses; the picker says
+  which port that is for the target) or one of the Mac's ports by the name macOS gives it
+  ("USB 10/100/1G LAN · 10.0.0.12"). Saved per Mac, by the port's system name (en7).
+- Sockets are tied to the chosen port (IP_BOUND_IF): what's sent goes out that port and
+  listeners only hear that port. A port that's unplugged says so; sending makes a fresh socket
+  when it fails, and listeners start again within 3 seconds when the port comes back.
+- Warnings when a console's address or the Art-Net broadcast isn't on the chosen port's network
+  ("2.255.255.255 isn't on USB LAN's network (10.0.0.0/8)"). Art-Net's Send to menu offers the
+  chosen port's own broadcast and 255.255.255.255. Nothing is changed for him.
+- OSC in shows the chosen port's address to send to.
+- Core: `NetworkPort` and `IPv4` (networks, broadcast, which port reaches a host, mismatch
+  wording), `ConsoleTarget.networkPort` (older settings load on Automatic). 143 tests pass.
+- **Needs a check on the Mac:** Art-Net and OSC leave on the chosen port with Wi-Fi on; listening
+  on a chosen port hears the desk.

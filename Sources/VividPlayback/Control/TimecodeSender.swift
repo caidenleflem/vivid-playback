@@ -10,6 +10,8 @@ final class TimecodeSender: @unchecked Sendable {
         var mtcDestination: Int32?
         var artNet = false
         var artNetTarget = "2.255.255.255"
+        /// The network port Art-Net goes out on ("en7"); nil lets macOS choose.
+        var artNetPort: String?
     }
 
     private let clock: OutputClock
@@ -18,7 +20,9 @@ final class TimecodeSender: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private let lock = NSLock()
     private var config = Config()
+    /// Queue only.
     private var socket = UDPSocket()
+    private var socketPort: String?
 
     // Sender state (queue only).
     private var piece = 0
@@ -111,7 +115,14 @@ final class TimecodeSender: @unchecked Sendable {
     }
 
     private func sendArtNet(_ tc: Timecode, _ c: Config) {
+        // Tied to the chosen network port; made again if the port changed, or if it wasn't
+        // there before (an adapter plugged back in).
+        if socketPort != c.artNetPort || socket == nil {
+            socket = UDPSocket(networkPort: c.artNetPort)
+            socketPort = c.artNetPort
+        }
         let ok = socket?.send(ArtNetTimecode.packet(tc), to: c.artNetTarget, port: ArtNetTimecode.port) ?? false
+        if !ok && c.artNetPort != nil { socket = nil }   // try a fresh one next frame
         lastArtNet = tc
         lock.lock(); _artNetError = !ok; lock.unlock()
     }
