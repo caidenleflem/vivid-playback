@@ -41,7 +41,8 @@ folder: `./scripts/make-dmg.sh`. The installer lands in `build/`.
   the LTC in the file.
 
 Keys: **Space** play or pause · **← →** previous and next song · **⌘←** top of the song ·
-Double-click a song to play it, triple-click to open its timeline ·
+Double-click a song to play it, triple-click to open its timeline · click the song in the player bar
+or **⇧⌘P** for the full-screen player ·
 **Return** or **⌘T** song timeline · **M** add a marker · **C** add a trigger · **L** loop between markers ·
 **⌘G** go to timecode · **⇧⌘F** full-screen clock · **Esc** back to the library ·
 **⌥⌘O** audio output · **⇧⌘E** edit setlist · **⇧⌘L** show mode · **⇧⌘I** things to check.

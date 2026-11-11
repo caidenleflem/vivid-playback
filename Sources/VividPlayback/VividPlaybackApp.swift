@@ -136,6 +136,9 @@ struct PlaybackCommands: Commands {
                 .keyboardShortcut("0", modifiers: [.command])
                 .disabled(model.screen != .timeline || !model.timelineWindow.isZoomed)
             Divider()
+            Button("Full-Screen Player") { model.go(model.screen == .player ? .library : .player) }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(model.show == nil)
             Button("Clock") { model.toggleClock() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Button("Albums") { model.go(.albums) }
@@ -170,7 +173,7 @@ struct RootView: View {
         switch screen {
         case .firstRun: return -1
         case .library, .albums, .connections: return 0
-        case .timeline: return 1
+        case .timeline, .player: return 1
         case .clock: return 2
         }
     }
@@ -207,6 +210,8 @@ struct RootView: View {
                 ClockScreen(morph: morph).transition(screenTransition)
             case .timeline:
                 SongTimelineView(morph: morph).transition(screenTransition)
+            case .player:
+                PlayerView().transition(screenTransition)
             default:
                 // One sidebar for Albums, Now playing and Connections: it stays put while the page
                 // beside it changes. The timeline and the clock replace the whole window.

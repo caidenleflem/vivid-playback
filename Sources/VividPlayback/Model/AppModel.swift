@@ -98,7 +98,7 @@ enum ImportState {
 }
 
 enum Screen: Equatable {
-    case firstRun, library, timeline, clock, albums, connections
+    case firstRun, library, timeline, clock, albums, connections, player
 
     /// The pages that share the sidebar: moving between them changes only the page.
     var hasSidebar: Bool { self == .library || self == .albums || self == .connections }
@@ -1636,6 +1636,7 @@ final class AppModel: ObservableObject {
         case "connections": target = .connections
         case "consoles": target = .connections; connectionsAnchor = "consoles"
         case "albums": target = .albums
+        case "player": target = .player
         case "add-album": target = .albums; demoAddAlbum = true
         case "labels": target = .timeline; demoLabels = true
         default: return

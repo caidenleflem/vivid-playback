@@ -383,3 +383,13 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   "starts in" update 10 times a second. CI, playing, app CPU before → after: Now playing 45 → 35%
   (first pass), Timeline 44 → 31%, Connections 78 → 56%, Labels sheet 71 → 37%; window server
   roughly halved. (CI Macs have no GPU, so real Macs use less.)
+
+## 2026-11-11: full-screen player
+
+- A Now Playing screen in the Apple Music style, with no timeline: large artwork (the album cover
+  when the setlist has one, else the song's art; it eases back a touch when paused), title,
+  artist · album · song n of m, a draggable scrubber (thicker on hover; locates on release),
+  large transport with a gold play button, the live timecode and rate, Loop / Stop after each,
+  the state chips, and Up Next (solid list; double-click plays, right-click to cue). Up Next hides
+  on narrow windows. Open it by clicking the song in the player bar or ⇧⌘P; chevron or Esc goes
+  back; Timeline and Clock are a click away. Same screen transition as the timeline.

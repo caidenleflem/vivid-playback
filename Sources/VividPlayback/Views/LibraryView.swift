@@ -269,8 +269,8 @@ struct PlayerBar: View {
                 .padding(.horizontal, 8)
                 .frame(height: 46)
                 .contentShape(Rectangle())
-                .onTapGesture { model.go(.timeline) }
-                .help("Open the song timeline (Return)")
+                .onTapGesture { model.go(.player) }
+                .help("Open the full-screen player (⇧⌘P)")
             } else {
                 Spacer()
             }
