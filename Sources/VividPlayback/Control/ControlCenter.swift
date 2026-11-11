@@ -139,18 +139,11 @@ final class ControlCenter: ObservableObject {
     @Published private(set) var midiDestinations: [MIDIEndpoint] = []
     @Published private(set) var inputDevices: [AudioDevice] = []
     @Published private(set) var oscStatus = ""
-    /// The last OSC messages that arrived, newest first, and what became of them.
-    @Published private(set) var oscHeard: [OSCHeard] = []
-    struct OSCHeard: Identifiable {
-        let id = UUID()
-        let text: String
-        let from: String
-        let meaning: String?
-        let at: Date
-    }
+    /// The last OSC messages that arrived. Its own object, so a busy desk only redraws the list
+    /// on the Connections page, never the timeline.
+    let oscMonitor = OSCMonitor()
     private func heard(_ text: String, from: String, meaning: String?) {
-        oscHeard.insert(OSCHeard(text: text, from: from, meaning: meaning, at: Date()), at: 0)
-        if oscHeard.count > 8 { oscHeard.removeLast(oscHeard.count - 8) }
+        oscMonitor.add(OSCMonitor.Heard(text: text, from: from, meaning: meaning, at: Date()))
     }
     @Published private(set) var lastRemote: (text: String, at: Date)?
     @Published var learning: RemoteAction?
@@ -474,4 +467,22 @@ final class ControlCenter: ObservableObject {
     }
 
     var isFollowing: Bool { settings.follow != .off }
+}
+
+/// The last OSC messages that arrived, newest first, and what became of them.
+@MainActor
+final class OSCMonitor: ObservableObject {
+    struct Heard: Identifiable {
+        let id = UUID()
+        let text: String
+        let from: String
+        let meaning: String?
+        let at: Date
+    }
+    @Published private(set) var items: [Heard] = []
+
+    func add(_ h: Heard) {
+        items.insert(h, at: 0)
+        if items.count > 8 { items.removeLast(items.count - 8) }
+    }
 }

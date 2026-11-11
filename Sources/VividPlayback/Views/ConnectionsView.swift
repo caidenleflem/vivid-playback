@@ -672,33 +672,10 @@ struct ConnectionsView: View {
                 }
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.3)))
-                if on { oscHeardBox }
+                if on { OSCHeardBox(monitor: control.oscMonitor, port: control.settings.oscPort) }
             }
         }
         .onAppear { portText = String(control.settings.oscPort) }
-    }
-
-    /// Everything that arrived lately, and what the app made of it.
-    private var oscHeardBox: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("HEARD").font(.manrope(10, .bold)).tracking(0.9).foregroundStyle(Brand.graphite)
-            if control.oscHeard.isEmpty {
-                Text("Nothing has arrived on port \(control.settings.oscPort) yet. Send something from the desk and it shows here.")
-                    .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
-            } else {
-                ForEach(control.oscHeard) { h in
-                    HStack(spacing: 8) {
-                        StatusDot(color: h.meaning == nil ? Brand.warn : Brand.ok)
-                        Text(h.text).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Brand.champagne).lineLimit(1)
-                        Spacer(minLength: 6)
-                        Text(h.meaning ?? "not a Vivid command").font(.manrope(11.5)).foregroundStyle(h.meaning == nil ? Brand.warn : Brand.space).lineLimit(1)
-                        Text(h.from).font(.manrope(11).monospacedDigit()).foregroundStyle(Brand.graphite)
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.3)))
     }
 
     private var midiCard: some View {
@@ -755,5 +732,33 @@ struct ConnectionsView: View {
             if trigger != nil { Button("Forget \(action.label)") { control.settings.midiMap[action.rawValue] = nil } }
         }
         .help(listening ? "Press the button on your controller. Click again to cancel." : "Click, then press a button on your controller.")
+    }
+}
+
+/// Everything that arrived lately on OSC in, and what the app made of it.
+struct OSCHeardBox: View {
+    @ObservedObject var monitor: OSCMonitor
+    let port: UInt16
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("HEARD").font(.manrope(10, .bold)).tracking(0.9).foregroundStyle(Brand.graphite)
+            if monitor.items.isEmpty {
+                Text("Nothing has arrived on port \(port) yet. Send something from the desk and it shows here.")
+                    .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(monitor.items) { h in
+                    HStack(spacing: 8) {
+                        StatusDot(color: h.meaning == nil ? Brand.warn : Brand.ok)
+                        Text(h.text).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Brand.champagne).lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text(h.meaning ?? "not a Vivid command").font(.manrope(11.5)).foregroundStyle(h.meaning == nil ? Brand.warn : Brand.space).lineLimit(1)
+                        Text(h.from).font(.manrope(11).monospacedDigit()).foregroundStyle(Brand.graphite)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.3)))
     }
 }

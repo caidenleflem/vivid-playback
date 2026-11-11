@@ -638,3 +638,21 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - GitHub's backup builds kept waiting 15 minutes for a Mac and being cancelled (never a compile
   failure; Caiden's own builds compile). The workflow now builds only the newest push (older
   waiting ones are dropped) and skips pushes that only change notes (docs, .md).
+
+## 2026-11-11: lots of lanes, smoother recording
+
+- **Scrolling lanes:** lanes share the room down to 22 points each; past that the whole timeline
+  scrolls up and down (lanes 26 points, the waveform 100–200), so the playhead, beat grid, marker
+  lines and selection boxes stay lined up. Up/down on the trackpad or wheel scrolls the lanes when
+  they overflow; sideways pans when zoomed; ⌘/⌥ zooms, as before.
+- **Choppy while recording**, causes found and fixed:
+  - Every change wrote the whole show to disk on the main thread, then refreshed the Albums
+    list and the Saved line; recording did that per trigger and per new lane. Saves now gather:
+    written once, half a second after the last change, off the main thread. Opening another show
+    and quitting write at once; a show whose file went to the Trash drops what's waiting.
+  - While recording: new triggers and lanes don't animate, and the selection and chosen lane
+    don't jump to each new trigger.
+  - The OSC Heard list is its own object, so incoming OSC only redraws that list, not the
+    timeline.
+  - The lane glow and trigger bloom checked every trigger against every lane 60 times a second;
+    now one pass over the triggers.

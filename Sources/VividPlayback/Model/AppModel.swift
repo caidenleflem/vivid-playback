@@ -150,6 +150,8 @@ final class AppModel: ObservableObject {
     @Published var timelineWindow = TimelineWindow(length: 1)
     /// Where the timeline's tracks sit in the window (top-left coordinates), for trackpad zoom.
     var timelineTrackFrame: CGRect = .zero
+    /// The timeline has more lanes than fit, and scrolls up and down.
+    var timelineScrolls = false
     private var eventMonitor: Any?
     /// The executor lane C adds triggers to.
     @Published var selectedLaneID: UUID?
@@ -223,6 +225,10 @@ final class AppModel: ObservableObject {
         control.onDeskGo = { [weak self] go in self?.deskGo(go) }
         control.onDeskSequence = { [weak self] event in self?.deskSequence(event) }
         control.onDeskLabel = { [weak self] label in self?.deskLabel(label) }
+        // Whatever's still waiting to be saved is written before the app quits.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flushSave(wait: true) }
+        }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .magnify]) { [weak self] event in
             guard let self else { return event }
             return self.handle(event) ? nil : event
@@ -395,6 +401,7 @@ final class AppModel: ObservableObject {
     /// Closes the open show (after its file went to the Trash): another saved show opens if there
     /// is one, otherwise the import screen.
     private func closeShow() {
+        dropPendingSave()
         transport.pause()
         UserDefaults.standard.removeObject(forKey: "lastShowPath")
         let others = library.filter { $0.url.standardizedFileURL != packageURL?.standardizedFileURL }
@@ -918,19 +925,26 @@ final class AppModel: ObservableObject {
                                action: LaneAction? = nil, value: Double? = nil) -> Marker? {
         guard !locked, let song = currentSong else { return nil }
         rememberMarkers(of: song)
-        selectedLaneID = lane.id
+        if !recordingFromDesk { selectedLaneID = lane.id }
         let tc = timecode(for: song, at: max(0, seconds))
         let count = song.markers.filter { $0.laneID == lane.id }.count + 1
         let marker = Marker(time: tc, label: label ?? (lane.action == .fader ? "Level" : "\(lane.action.label) \(count)"),
                             laneID: lane.id, value: value ?? (lane.action == .fader ? 100 : nil), action: action)
-        withAnimation(.vivid(0.35)) {
-            edit { show in
+        let insert = {
+            self.edit { show in
                 guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
                 show.songs[i].markers.append(marker)
                 show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
             }
         }
-        selectedMarkerID = marker.id
+        // Recording from the desk brings triggers fast: no animation and no selection, so the
+        // timeline stays smooth.
+        if recordingFromDesk {
+            insert()
+        } else {
+            withAnimation(.vivid(0.35)) { insert() }
+            selectedMarkerID = marker.id
+        }
         return marker
     }
 
@@ -1234,6 +1248,8 @@ final class AppModel: ObservableObject {
         if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
             w.zoom(by: exp(dy * 0.01), around: w.time(atX: x, width: width))
         } else {
+            // Up and down scrolls the lanes when there are more than fit; sideways pans.
+            if timelineScrolls && abs(dy) > abs(dx) { return false }
             guard w.isZoomed else { return false }
             let delta = abs(dx) >= abs(dy) ? dx : dy
             w.pan(by: -delta / max(width, 1) * w.span)
@@ -1841,6 +1857,7 @@ final class AppModel: ObservableObject {
     }
 
     func open(package: URL) {
+        flushSave(wait: true)
         do {
             let show = try ShowStore.load(from: package)
             load(show, package: package, issues: [])
@@ -1925,16 +1942,72 @@ final class AppModel: ObservableObject {
     }
 
     /// Saves after every change. A failure is said out loud, never swallowed.
+    /// Saves after a change. Changes that come quickly (recording from the desk, dragging) are
+    /// gathered and written once, half a second after the last, off the main thread, so the
+    /// timeline never waits for the disk. Switching shows and quitting write at once.
     func save() {
         guard let show, let packageURL else { return }
-        do {
-            try ShowStore.save(show, to: packageURL)
-            lastSaved = Date()
-            if let i = library.firstIndex(where: { $0.url.standardizedFileURL == packageURL.standardizedFileURL }) {
-                library[i] = ShowLibrary.Entry(url: packageURL, show: show)
+        if let p = pendingSave, p.url.standardizedFileURL != packageURL.standardizedFileURL { writeSave(p, wait: true) }
+        pendingSave = (show, packageURL)
+        saveTimer?.invalidate()
+        saveTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.flushSave() }
+        }
+    }
+
+    private var pendingSave: (show: Show, url: URL)?
+    private var saveTimer: Timer?
+    private let saveQueue = DispatchQueue(label: "vivid.save", qos: .utility)
+
+    /// Writes any change still waiting. With `wait`, it's on disk before this returns.
+    func flushSave(wait: Bool = false) {
+        saveTimer?.invalidate()
+        saveTimer = nil
+        guard let p = pendingSave else {
+            if wait { saveQueue.sync {} }
+            return
+        }
+        pendingSave = nil
+        writeSave(p, wait: wait)
+    }
+
+    /// Forgets a change still waiting (the show's file went to the Trash).
+    private func dropPendingSave() {
+        saveTimer?.invalidate()
+        saveTimer = nil
+        pendingSave = nil
+    }
+
+    private func writeSave(_ p: (show: Show, url: URL), wait: Bool) {
+        let show = p.show, url = p.url
+        if wait {
+            let error = saveQueue.sync { Self.write(show, to: url) }
+            saved(show, to: url, error: error)
+        } else {
+            saveQueue.async {
+                let error = Self.write(show, to: url)
+                Task { @MainActor [weak self] in self?.saved(show, to: url, error: error) }
             }
+        }
+    }
+
+    nonisolated private static func write(_ show: Show, to url: URL) -> String? {
+        do {
+            try ShowStore.save(show, to: url)
+            return nil
         } catch {
-            post("Couldn't save the show to \(packageURL.path): \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
+    private func saved(_ show: Show, to url: URL, error: String?) {
+        if let error {
+            post("Couldn't save the show to \(url.path): \(error)")
+            return
+        }
+        lastSaved = Date()
+        if let i = library.firstIndex(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+            library[i] = ShowLibrary.Entry(url: url, show: show)
         }
     }
 
@@ -1942,6 +2015,7 @@ final class AppModel: ObservableObject {
     func saveNow() {
         guard let packageURL else { return }
         save()
+        flushSave(wait: true)
         post("Saved to \(packageURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). Every change saves itself.")
     }
 

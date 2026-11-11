@@ -211,9 +211,13 @@ struct TimelinePanel: View {
                 let markerSpace: CGFloat = plain.isEmpty ? 0 : 54
                 let base: CGFloat = 22 + 10 + 10 + 26 + markerSpace + 4
                 let laneChrome: CGFloat = lanes.isEmpty ? 0 : 10 + 6 * max(0, n - 1) + 6 + 26
-                let laneHeight: CGFloat = lanes.isEmpty ? 0 : min(34, max(22, (geo.size.height - base - laneChrome - 80) / max(n, 1)))
+                // Lanes share the room down to 22 points each; past that the timeline scrolls, with
+                // lanes at a comfortable 26 points and a shorter waveform.
+                let fitHeight = (geo.size.height - base - laneChrome - 80) / max(n, 1)
+                let scrolls = !lanes.isEmpty && fitHeight < 22
+                let laneHeight: CGFloat = lanes.isEmpty ? 0 : (scrolls ? 26 : min(34, fitHeight))
                 let laneSpace = lanes.isEmpty ? 0 : laneChrome + n * laneHeight
-                let waveHeight = max(80, geo.size.height - base - laneSpace)
+                let waveHeight = scrolls ? max(100, min(200, geo.size.height * 0.3)) : max(80, geo.size.height - base - laneSpace)
                 let lanesHeight = 22 + 10 + waveHeight + 10 + 26 + markerSpace + laneSpace
                 let scrubLimit = 22 + 10 + waveHeight + 10 + 26
                 let linesBottom = lanesHeight - (lanes.isEmpty ? 0 : 32)
@@ -222,7 +226,7 @@ struct TimelinePanel: View {
                 // played part of the waveform, pulses) redraws while playing.
                 let win = staticWindow(length: length)
                 let rows = markerRows(scrubLimit: scrubLimit, laneHeight: laneHeight)
-                VStack(alignment: .leading, spacing: 10) {
+                let content = VStack(alignment: .leading, spacing: 10) {
                     ruler(width: trackWidth, win: win)
                     lane("Master") {
                         WaveformView(data: model.waveforms[song.id], fileOffset: song.fileOffset,
@@ -280,8 +284,21 @@ struct TimelinePanel: View {
                     transport.locate(win.time(atX: Double(min(x, trackWidth)), width: Double(trackWidth)))
                 })
                 .simultaneousGesture(marqueeGesture(scrubLimit: scrubLimit, laneHeight: laneHeight, width: trackWidth, win: win))
-                .onAppear { reportTrackFrame(geo, trackWidth: trackWidth) }
+                Group {
+                    if scrolls {
+                        // Too many lanes to fit: everything scrolls together, so the playhead, the
+                        // grid and selection boxes stay lined up with the lanes.
+                        ScrollView(.vertical, showsIndicators: true) {
+                            content.frame(height: lanesHeight, alignment: .top)
+                        }
+                    } else {
+                        content
+                    }
+                }
+                .onAppear { reportTrackFrame(geo, trackWidth: trackWidth); model.timelineScrolls = scrolls }
                 .onChange(of: geo.frame(in: .global)) { _ in reportTrackFrame(geo, trackWidth: trackWidth) }
+                .onChange(of: scrolls) { model.timelineScrolls = $0 }
+                .onDisappear { model.timelineScrolls = false }
             }
             if model.recordingFromDesk && lanes.isEmpty {
                 DeskRecordingLine()
@@ -315,8 +332,9 @@ struct TimelinePanel: View {
         .solidPanel()
         .overlay(alignment: .bottom) { selectionBar.padding(.bottom, 12) }
 
-        .animation(.vivid(0.3), value: model.selectedMarkerIDs.isEmpty)
-        .animation(.vivid(0.4), value: lanes)
+        // While recording from the desk, lanes and triggers arrive fast: no animation, so it stays smooth.
+        .animation(model.recordingFromDesk ? nil : .vivid(0.3), value: model.selectedMarkerIDs.isEmpty)
+        .animation(model.recordingFromDesk ? nil : .vivid(0.4), value: lanes)
         .onAppear {
             model.loadWaveform(for: song)
         }
@@ -386,22 +404,29 @@ struct TimelinePanel: View {
         let bloomTime = 0.3, glowTime = 0.4
         var blooms: [(id: UUID, x: CGFloat, top: CGFloat, height: CGFloat, p: CGFloat)] = []
         var glows: [(id: UUID, top: CGFloat, height: CGFloat, p: CGFloat, color: Color)] = []
-        for row in rows {
-            guard let laneID = row.laneID, let lane = lanes.first(where: { $0.id == laneID }), !lane.muted else { continue }
-            var strongest: CGFloat = 0
-            for m in song.markers where m.laneID == laneID {
-                let dt = position - model.seconds(of: m, in: song)
-                guard dt >= 0, dt < glowTime else { continue }
-                strongest = max(strongest, CGFloat(1 - dt / glowTime))
-                if dt < bloomTime {
-                    let u = CGFloat(1 - dt / bloomTime)
-                    let x = xPos(of: m, width: width, win: win)
-                    if x >= -20 && x <= width + 20 {
-                        blooms.append((m.id, labelWidth + 12 + x, row.top + 4, max(8, row.height - 8), u * u))
-                    }
+        // One pass over the triggers that just played (not every trigger for every lane, every frame).
+        var rowFor: [UUID: (top: CGFloat, height: CGFloat)] = [:]
+        for row in rows { if let id = row.laneID { rowFor[id] = (row.top, row.height) } }
+        var laneFor: [UUID: TriggerLane] = [:]
+        for l in lanes where !l.muted { laneFor[l.id] = l }
+        var strongest: [UUID: CGFloat] = [:]
+        let fps = song.rate.framesPerSecond
+        for m in song.markers {
+            guard let laneID = m.laneID, let row = rowFor[laneID], laneFor[laneID] != nil else { continue }
+            let dt = position - Double(m.time.frames(since: song.start)) / fps
+            guard dt >= 0, dt < glowTime else { continue }
+            strongest[laneID] = max(strongest[laneID] ?? 0, CGFloat(1 - dt / glowTime))
+            if dt < bloomTime {
+                let u = CGFloat(1 - dt / bloomTime)
+                let x = xPos(of: m, width: width, win: win)
+                if x >= -20 && x <= width + 20 {
+                    blooms.append((m.id, labelWidth + 12 + x, row.top + 4, max(8, row.height - 8), u * u))
                 }
             }
-            if strongest > 0 { glows.append((laneID, row.top, row.height, strongest * strongest, Brand.lane(lane.color))) }
+        }
+        for (laneID, s) in strongest {
+            guard let row = rowFor[laneID], let lane = laneFor[laneID] else { continue }
+            glows.append((laneID, row.top, row.height, s * s, Brand.lane(lane.color)))
         }
         return ZStack(alignment: .topLeading) {
             ForEach(glows, id: \.id) { g in
