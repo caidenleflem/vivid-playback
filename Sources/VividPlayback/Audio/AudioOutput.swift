@@ -209,9 +209,18 @@ final class AudioOutput {
                                           &id, UInt32(MemoryLayout<AudioDeviceID>.size))
         guard status == noErr else { throw AudioOutputError.cantSelect(device.name, status) }
 
+        // The engine's own idea of the output format can still be the old device's (it's read
+        // when the engine is made, on the system output). Ask the output unit for the device's
+        // side after the switch, and trust Core Audio's count of the device's outputs over both.
+        var deviceSide = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let unitRead = AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0,
+                                            &deviceSide, &size) == noErr
         let hardware = output.outputFormat(forBus: 0)
-        sampleRate = hardware.sampleRate > 0 ? hardware.sampleRate : (device.sampleRate > 0 ? device.sampleRate : 48_000)
-        channelCount = max(1, hardware.channelCount > 0 ? Int(hardware.channelCount) : device.outputChannels)
+        let rates = [device.sampleRate, unitRead ? deviceSide.mSampleRate : 0, hardware.sampleRate]
+        sampleRate = rates.first { $0 > 0 } ?? 48_000
+        let counts = [device.outputChannels, unitRead ? Int(deviceSide.mChannelsPerFrame) : 0, Int(hardware.channelCount)]
+        channelCount = max(1, counts.first { $0 > 0 } ?? 2)
 
         let format: AVAudioFormat
         if channelCount <= 2 {

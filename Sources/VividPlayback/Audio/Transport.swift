@@ -170,7 +170,12 @@ final class Transport: ObservableObject {
         audio.state.masterGain = Mixer.gain(dB: routing.masterGainDB)
         audio.state.timecodeGain = Mixer.gain(dB: routing.timecodeGainDB)
         timecodeRouted = audio.state.map.timecode != nil
+        let missing = audio.isRunning && routing.timecodeChannel != nil && !timecodeRouted
+        if timecodeMissing != missing { timecodeMissing = missing }
     }
+
+    /// A timecode output is chosen but the running device doesn't have it: nothing goes out.
+    @Published private(set) var timecodeMissing = false
 
     /// Where the master's left side and the timecode come out of the running device (0-based),
     /// for the meters.

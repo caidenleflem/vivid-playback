@@ -490,3 +490,14 @@ master and for LTC.
   outputs are now labelled with their interface ("Output 3 · MOTU M4 out 1"), the sheet lists
   which outputs belong to which interface, and warns when their rates differ.
 - New rule (Caiden's call): always merge to `main` after pushing.
+
+## 2026-11-11: timecode interface fix
+
+- Caiden picked the Scarlett as the timecode interface: the app joined it with the MacBook's
+  speakers, but sent no timecode (yellow, "Choose a timecode output"). The audio engine reported
+  the output layout of the device it started on (the MacBook's 2 outputs), so the Scarlett's
+  outputs looked missing and timecode was dropped. The engine now takes the outputs and sample
+  rate from Core Audio's own description of the device (then the output unit's, then the
+  engine's), which may also be why his own aggregate stayed silent.
+- When a timecode output is chosen but the running audio can't reach it, the LTC card and the
+  Audio output sheet now say so, instead of "Choose a timecode output".

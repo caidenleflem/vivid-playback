@@ -131,6 +131,9 @@ struct OutputSheet: View {
                 if let d = device, d.isDante, !split {
                     danteCard(d, routing: routing)
                 }
+                if transport.timecodeMissing {
+                    note("Timecode is set to \(tcDevice?.outputLabel(routing.timecodeChannel ?? 0) ?? "an output") but the audio running now can't reach it, so no timecode is going out. Pick the interface and output again, or press the refresh button by the interface.", warn: true)
+                }
                 if split {
                     if let m = device, let t = tcDevice {
                         note("The master plays on \(m.name) and timecode on \(t.name), as one device: \(m.name) is the clock and \(t.name) is kept in step with it. For a perfect lock, clock both from the same word clock, or put both on Dante.", warn: false)
