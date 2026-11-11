@@ -393,3 +393,6 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   the state chips, and Up Next (solid list; double-click plays, right-click to cue). Up Next hides
   on narrow windows. Open it by clicking the song in the player bar or ⇧⌘P; chevron or Esc goes
   back; Timeline and Clock are a click away. Same screen transition as the timeline.
+- Up Next starts collapsed to just the next song ("Next · +n more"), as a card that hugs its
+  content; click the header or chevron to show the rest of the set (full-height list), and again
+  to collapse. Opens collapsed each time.

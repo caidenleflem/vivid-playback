@@ -253,23 +253,46 @@ private struct ExtrasRow: View {
 // MARK: Up Next
 
 /// What plays after this song, in setlist order. A solid list (lists are never glass).
+/// What plays after this song, in setlist order. A solid list (lists are never glass). Starts
+/// collapsed to just the next song; the chevron shows the rest of the set.
 private struct UpNextPanel: View {
     @EnvironmentObject private var model: AppModel
-    @EnvironmentObject private var transport: Transport
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let q = model.queue
         let current = q.firstIndex { $0.id == model.currentSong?.id } ?? -1
         let upcoming = Array(q.enumerated()).filter { $0.offset > current }
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Up Next").font(.manrope(17, .bold)).foregroundStyle(Brand.ink)
-                Spacer()
-                Text(model.setlist?.name ?? "").font(.manrope(12, .medium)).foregroundStyle(Brand.space).lineLimit(1)
+            Button {
+                withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .vivid(0.35)) { expanded.toggle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(expanded ? "Up Next" : "Next").font(.manrope(17, .bold)).foregroundStyle(Brand.ink)
+                    if !expanded && upcoming.count > 1 {
+                        Text("+\(upcoming.count - 1) more").font(.manrope(12, .medium)).foregroundStyle(Brand.space)
+                    }
+                    Spacer()
+                    if expanded {
+                        Text(model.setlist?.name ?? "").font(.manrope(12, .medium)).foregroundStyle(Brand.space).lineLimit(1)
+                    }
+                    if upcoming.count > 1 {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Brand.steel)
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                    }
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(upcoming.count <= 1)
+            .help(expanded ? "Show just the next song" : "Show the rest of the set")
             .padding(.horizontal, 16)
             .padding(.top, 16)
             .padding(.bottom, 10)
+
             if model.stopAfterEach && !upcoming.isEmpty {
                 Label("Stops after this song", systemImage: "stop.circle")
                     .font(.manrope(11.5, .semibold)).foregroundStyle(Brand.gold)
@@ -277,9 +300,8 @@ private struct UpNextPanel: View {
             }
             if upcoming.isEmpty {
                 Text("Last song of the set").font(.manrope(13)).foregroundStyle(Brand.space)
-                    .padding(16)
-                Spacer()
-            } else {
+                    .padding(.horizontal, 16).padding(.bottom, 16)
+            } else if expanded {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(upcoming, id: \.element.id) { item in
@@ -289,10 +311,17 @@ private struct UpNextPanel: View {
                     .padding(.horizontal, 8)
                     .padding(.bottom, 10)
                 }
+                .transition(.opacity)
+            } else if let next = upcoming.first {
+                UpNextRow(song: next.element, number: next.offset + 1)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
             }
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxHeight: expanded ? .infinity : nil, alignment: .top)
         .solidPanel()
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
