@@ -721,3 +721,23 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   also lists the desk's timecode shows (tracks, targets, first events with their times and
   tokens), to learn how 2.3.2.0 stores them. Next: read that and skip changes that line up with
   the show's own events.
+
+## 2026-11-11: grandMA3 timecode import
+
+- Caiden: what's really needed is importing a grandMA3 timecode show into a song's markers. He
+  sent a 2.3.2.0 export (DIVA). **Playback › Import grandMA3 Timecode…** (or the link on an empty
+  timeline): pick one or more XML exports. Each show goes onto its song: by name, else the song
+  its start timecode falls in, else the selected song (and says which). One lane per track,
+  named after it, **firing its sequence directly** (`Go+ Sequence "DIVA DROP KICK"`,
+  `Go+ Sequence 82`), as the desk's timecode show does: no executors needed. One trigger per
+  event at offset + time (nearest frame), named after its cue; the lane does what most of the
+  track does and the rest carry their own action (Off on a Go+ lane). Re-importing reuses lanes
+  and skips triggers already there. Reported, never fixed: events outside the song, events Vivid
+  can't send (Flash, Temp…), tracks that fire something other than a sequence, and a desk show
+  that starts at a different timecode than the song. One notice, one Undo.
+- Lanes can target a sequence (`TriggerLane.sequence`); the lane editor shows it, with "Fire an
+  executor instead". Sequence lanes stay out of Import Labels to Console.
+- Core: `MA3Timecode` (XML reader), `MA3TimecodeImport` (song matching, applying). The real
+  DIVA export: 9 lanes, 247 triggers, nothing outside or unsupported. 179 tests pass.
+- Caiden didn't ask for the record-arm and timecode-listing work just before this; it stays (it's
+  harmless) but isn't the direction. He mentioned needing "a new one" (likely a re-saved plugin).

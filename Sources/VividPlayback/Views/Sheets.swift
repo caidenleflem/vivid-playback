@@ -469,13 +469,28 @@ struct LaneEditor: View {
                     .textFieldStyle(.roundedBorder).font(.manrope(14))
             }
 
-            field("Executor") {
-                HStack(spacing: 10) {
-                    numberBox("Page", value: $lane.page)
-                    Text(".").font(.manrope(18, .semibold)).foregroundStyle(Brand.graphite)
-                    numberBox("Exec", value: $lane.executor)
-                    Text("Page \(lane.page), executor \(lane.executor)").font(.manrope(12)).foregroundStyle(Brand.graphite)
-                        .padding(.leading, 6)
+            if let seq = lane.sequence {
+                field("Sequence") {
+                    HStack(spacing: 10) {
+                        TextField("Name or number", text: Binding(get: { seq }, set: { lane.sequence = $0 }))
+                            .textFieldStyle(.roundedBorder).font(.manrope(13)).frame(width: 220)
+                        Button("Fire an executor instead") {
+                            lane.sequence = nil
+                            if lane.page < 1 { lane.page = 1 }
+                            if lane.executor < 1 { lane.executor = 201 }
+                        }
+                        .buttonStyle(QuietButtonStyle())
+                    }
+                }
+            } else {
+                field("Executor") {
+                    HStack(spacing: 10) {
+                        numberBox("Page", value: $lane.page)
+                        Text(".").font(.manrope(18, .semibold)).foregroundStyle(Brand.graphite)
+                        numberBox("Exec", value: $lane.executor)
+                        Text("Page \(lane.page), executor \(lane.executor)").font(.manrope(12)).foregroundStyle(Brand.graphite)
+                            .padding(.leading, 6)
+                    }
                 }
             }
 

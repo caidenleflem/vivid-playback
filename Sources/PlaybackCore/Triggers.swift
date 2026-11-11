@@ -65,9 +65,14 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
     public var muted: Bool
     /// The key that drops a trigger on this lane at the playhead (one lowercase character).
     public var key: String?
+    /// A sequence this lane fires directly, by name or number, instead of an executor (as a
+    /// grandMA3 timecode show does). Nil fires the executor.
+    public var sequence: String?
 
     public init(id: UUID = UUID(), name: String = "", page: Int = 1, executor: Int = 201, action: LaneAction = .goPlus,
-                command: String? = nil, consoleIDs: [UUID] = [], color: Int = 0, muted: Bool = false, key: String? = nil) {
+                command: String? = nil, consoleIDs: [UUID] = [], color: Int = 0, muted: Bool = false, key: String? = nil,
+                sequence: String? = nil) {
+        self.sequence = sequence
         self.id = id
         self.name = name
         self.page = page
@@ -110,13 +115,27 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
     /// "1.201 · Go+", or the lane's own name.
     public var title: String {
         let n = name.trimmingCharacters(in: .whitespaces)
-        return n.isEmpty ? "\(page).\(executor) · \(action.label)" : n
+        if !n.isEmpty { return n }
+        return "\(sequence.map { "Sequence \($0)" } ?? "\(page).\(executor)") · \(action.label)"
     }
+
+    /// What the commands address: "Page 3.201", or "Sequence 82" / "Sequence \"DIVA DROP\"".
+    public var target: String {
+        if let s = sequence?.trimmingCharacters(in: .whitespaces), !s.isEmpty {
+            if Int(s) != nil { return "Sequence \(s)" }
+            return "Sequence \"\(s.replacingOccurrences(of: "\"", with: ""))\""
+        }
+        return "Page \(page).\(executor)"
+    }
+
+    /// "3.201", or the sequence for a lane that fires one directly.
+    public var whereText: String { sequence.map { "Seq \($0)" } ?? "\(page).\(executor)" }
 
     /// The command line this lane sends for a trigger (nil for fader lanes, which send a level).
     public func commandLine(for marker: Marker? = nil) -> String? {
-        // grandMA3 addresses an executor by its page: "Go+ Page 3.201".
-        let target = "Page \(page).\(executor)"
+        // grandMA3 addresses an executor by its page ("Go+ Page 3.201"), a sequence by its name
+        // or number ("Go+ Sequence 82").
+        let target = self.target
         switch marker?.action ?? action {
         case .goPlus: return "Go+ \(target)"
         case .goMinus: return "Go- \(target)"
@@ -145,6 +164,7 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
 
     public func messages(for marker: Marker?, console: ConsoleTarget) -> [OSCMessage] {
         if (marker?.action ?? action) == .fader {
+            guard sequence == nil else { return [] }   // a fader needs an executor
             let level = Int32(max(0, min(100, (marker?.value ?? 100).rounded())))
             return [OSCMessage("\(console.root)/Page\(page)/Fader\(executor)", [.int(level)])]
         }
@@ -230,7 +250,7 @@ public struct ExecutorLabel: Equatable, Identifiable, Sendable {
     public static func plan(lanes: [TriggerLane]) -> [ExecutorLabel] {
         var order: [String] = []
         var byExec: [String: (page: Int, exec: Int, counts: [String: Int], firstSeen: [String], consoles: Set<UUID>, all: Bool, lanes: Int)] = [:]
-        for lane in lanes {
+        for lane in lanes where lane.sequence == nil {
             let name = lane.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { continue }
             let key = "\(lane.page).\(lane.executor)"

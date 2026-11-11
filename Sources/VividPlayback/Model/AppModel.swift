@@ -1164,6 +1164,86 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Imports grandMA3 timecode shows (their exported XML) as lanes and triggers: each show onto
+    /// its song (by name, else by timecode, else the selected song), one lane per track firing its
+    /// sequence, one trigger per event, placed by timecode. One notice, one Undo.
+    func importMA3Timecode() {
+        guard !locked, show != nil else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.xml]
+        panel.prompt = "Import"
+        panel.message = "Choose grandMA3 timecode exports (XML), one per song."
+        guard panel.runModal() == .OK else { return }
+        importMA3Timecode(panel.urls)
+    }
+
+    func importMA3Timecode(_ urls: [URL]) {
+        guard !locked, var show else { return }
+        let before = show.songs
+        var lines: [String] = []
+        var imported = 0
+        for url in urls {
+            guard let data = try? Data(contentsOf: url) else {
+                lines.append("\(url.lastPathComponent): couldn't be read.")
+                continue
+            }
+            let shows = MA3Timecode.parse(data)
+            if shows.isEmpty { lines.append("\(url.lastPathComponent): no timecode show in it.") }
+            for tc in shows {
+                guard let target = MA3TimecodeImport.song(for: tc, in: show.songs, selected: currentSong?.id),
+                      let i = show.songs.firstIndex(where: { $0.id == target.id }) else {
+                    lines.append("\(tc.name): no song to put it on. Select one and import again.")
+                    continue
+                }
+                let r = MA3TimecodeImport.apply(tc, to: &show.songs[i])
+                imported += r.triggers
+                let title = show.songs[i].title
+                var line = "\(tc.name) → \(title)"
+                switch target.match {
+                case .name: break
+                case .timecode: line += " (by its timecode)"
+                case .selected: line += " (the selected song: no song is named \(tc.name) or plays at its timecode)"
+                }
+                line += ": \(r.triggers) trigger\(r.triggers == 1 ? "" : "s") on \(r.lanesAdded + r.lanesReused) lane\(r.lanesAdded + r.lanesReused == 1 ? "" : "s")"
+                if r.lanesAdded > 0 && r.lanesReused > 0 { line += " (\(r.lanesAdded) new)" }
+                line += "."
+                if r.duplicates > 0 { line += " \(r.duplicates) already there." }
+                if r.outside > 0 { line += " \(r.outside) fall outside the song, left out." }
+                if !r.unsupported.isEmpty {
+                    line += " Not imported: " + r.unsupported.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }.joined(separator: ", ") + "."
+                }
+                if tc.otherTracks > 0 { line += " \(tc.otherTracks) track\(tc.otherTracks == 1 ? "" : "s") fire something other than a sequence, left out." }
+                if abs(r.startDifference) >= 1 / show.songs[i].rate.framesPerSecond {
+                    let showStart = Timecode(frameCount: Int((tc.offset * show.songs[i].rate.framesPerSecond).rounded()), rate: show.songs[i].rate)
+                    line += " The desk's show starts at \(showStart), the song at \(show.songs[i].start): placed by timecode."
+                }
+                lines.append(line)
+            }
+        }
+        guard imported > 0 || before != show.songs else {
+            post(lines.isEmpty ? "Nothing to import." : lines.joined(separator: " "))
+            return
+        }
+        self.show = show
+        if let song = currentSong { transport.update(song, in: show) }
+        save()
+        postUndo(lines.joined(separator: " ")) { [weak self] in
+            guard let self, !self.locked, var now = self.show else { return }
+            let restore = Dictionary(uniqueKeysWithValues: before.map { ($0.id, $0) })
+            for j in now.songs.indices {
+                if let old = restore[now.songs[j].id] {
+                    now.songs[j].markers = old.markers
+                    now.songs[j].triggerLanes = old.triggerLanes
+                }
+            }
+            self.show = now
+            if let song = self.currentSong { self.transport.update(song, in: now) }
+            self.save()
+        }
+    }
+
     /// Writes the grandMA3 plugins (Vivid Recorder and Vivid Labels, each an XML and a Lua) into a
     /// folder, for a USB stick's grandMA3_library/plugins.
     func saveDeskPlugin() {

@@ -319,6 +319,13 @@ struct TimelinePanel: View {
                         .fixedSize()
                         .padding(.leading, 10)
                     }
+                    if !model.locked {
+                        Button { model.importMA3Timecode() } label: {
+                            Text("Import grandMA3 timecode…").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.gold)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 10)
+                    }
                 }
                 .font(.manrope(12.5))
                 .foregroundStyle(Brand.graphite)
@@ -852,7 +859,7 @@ struct TimelinePanel: View {
     private func laneLabel(_ lane: TriggerLane, color: Color, selected: Bool, height: CGFloat) -> some View {
         let (target, reachable) = targetText(lane)
         let hasName = !lane.name.trimmingCharacters(in: .whitespaces).isEmpty
-        let detail = hasName ? "\(lane.page).\(lane.executor) · \(lane.action == .custom ? "Custom" : lane.action.label) · \(target)" : target
+        let detail = hasName ? "\(lane.whereText) · \(lane.action == .custom ? "Custom" : lane.action.label) · \(target)" : target
         let showArm = model.recordingFromDesk || !model.armedExecutors.isEmpty
         let armed = model.isArmed(lane)
         let main = Button { model.selectedLaneID = lane.id } label: {

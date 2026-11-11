@@ -104,6 +104,8 @@ struct PlaybackCommands: Commands {
             Button(model.recordingFromDesk ? "Stop Recording from the Desk" : "Record GOs from the Desk") { model.toggleDeskRecording() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(model.show == nil || (model.locked && !model.recordingFromDesk))
+            Button("Import grandMA3 Timecode…") { model.importMA3Timecode() }
+                .disabled(model.locked || model.show == nil)
             Button("Save grandMA3 Plugins…") { model.saveDeskPlugin() }
             Button("Import Labels to Console…") { model.labelsShown = true }
                 .disabled(model.show == nil)
