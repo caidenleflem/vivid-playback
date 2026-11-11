@@ -99,11 +99,8 @@ struct PlayerView: View {
             TransportControls()
                 .padding(.top, 14)
 
-            HStack(spacing: 10) {
-                LiveClock(size: 22, weight: .regular)
-                if song.hasTimecode { Chip(song.rate.displayName) }
-            }
-            .padding(.top, 14)
+            LiveClock(size: 22, weight: .regular)
+                .padding(.top, 14)
 
             ExtrasRow()
                 .padding(.top, 18)
