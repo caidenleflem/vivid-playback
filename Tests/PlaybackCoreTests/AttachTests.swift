@@ -84,4 +84,31 @@ final class AttachTests: XCTestCase {
         ShowImporter.remove(.master, songID: id, in: &s)
         XCTAssertNil(s.songs[1].masterPath)
     }
+
+    func testAudioDecidesHowLongASongPlays() throws {
+        // The sheet says 4 s; the master is 0.1 s and the timecode file 3 s: the song plays as long
+        // as its audio (the longer of the two), not the sheet.
+        var s = try show()
+        XCTAssertEqual(s.songs[0].playLength, 4)                 // no audio yet: the sheet's length
+        let master = try tone("01 Overture.wav")
+        let tc = try ltc("01:00:00:00", "01 Overture LTC.wav")
+        _ = try ShowImporter.assign(master, role: .master, songID: s.songs[0].id, in: &s, reader: WAVFile())
+        _ = try ShowImporter.assign(tc, role: .timecode, songID: s.songs[0].id, in: &s, reader: WAVFile())
+        _ = ShowImporter(reader: WAVFile()).check(&s, deviceSampleRate: nil)
+        XCTAssertEqual(s.songs[0].audioLength ?? 0, 3, accuracy: 0.01)
+        XCTAssertEqual(s.songs[0].playLength ?? 0, 3, accuracy: 0.01)
+        XCTAssertEqual(s.songs[0].length, 4)                     // the sheet itself is left alone
+        // Remove the files: back to the sheet.
+        ShowImporter.remove(.master, songID: s.songs[0].id, in: &s)
+        ShowImporter.remove(.timecode, songID: s.songs[0].id, in: &s)
+        _ = ShowImporter(reader: WAVFile()).check(&s, deviceSampleRate: nil)
+        XCTAssertNil(s.songs[0].audioLength)
+        XCTAssertEqual(s.songs[0].playLength, 4)
+    }
+
+    func testPlayLengthAllowsForThePreRoll() {
+        var song = Song(title: "x", start: Timecode("01:00:00:00", rate: .fps30)!, fileOffset: 2, length: 100)
+        song.audioLength = 250
+        XCTAssertEqual(song.playLength, 248)
+    }
 }

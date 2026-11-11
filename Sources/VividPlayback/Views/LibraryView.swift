@@ -466,7 +466,7 @@ struct SongList: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(song.hasTimecode ? song.start.description : "—").frame(width: 150, alignment: .leading)
-            Text(song.length.map(TimeFormat.clock) ?? "—").frame(width: 84, alignment: .leading)
+            Text(song.playLength.map(TimeFormat.clock) ?? "—").frame(width: 84, alignment: .leading)
             Text(song.hasTimecode ? song.rate.shortName : "—").frame(width: 80, alignment: .leading)
             Button { if !issues.isEmpty || !model.hiddenIssues(for: song).isEmpty { issuesFor = song.id } } label: {
                 HStack(spacing: 8) {

@@ -70,7 +70,7 @@ struct SongProgress<Content: View>: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / rate, paused: !transport.isPlaying)) { _ in
-            let length = model.currentSong?.length ?? 0
+            let length = model.currentSong.map(model.playLength(of:)) ?? 0
             content(min(transport.position(at: CACurrentMediaTime()), max(length, 0)), length)
         }
     }

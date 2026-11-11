@@ -168,7 +168,7 @@ struct TimelinePanel: View {
     private var labelWidth: CGFloat { lanes.isEmpty ? 92 : 156 }
 
     var body: some View {
-        let length = max(song.length ?? 0, 0.001)
+        let length = max(model.playLength(of: song), 0.001)
         let plain = plainMarkers
         VStack(alignment: .leading, spacing: 10) {
             GeometryReader { geo in

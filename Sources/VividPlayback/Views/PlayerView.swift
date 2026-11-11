@@ -351,7 +351,7 @@ private struct UpNextRow: View {
                     .font(.manrope(11.5).monospacedDigit()).foregroundStyle(Brand.space)
             }
             Spacer(minLength: 4)
-            if let length = song.length {
+            if let length = song.playLength {
                 Text(TimeFormat.clock(length)).font(.manrope(12).monospacedDigit()).foregroundStyle(Brand.space)
             }
         }

@@ -129,7 +129,7 @@ final class AppModel: ObservableObject {
             syncTriggers()
             if currentSongID != oldValue {
                 selectedMarkerIDs = []
-                timelineWindow = TimelineWindow(length: currentSong?.length ?? 1)
+                timelineWindow = TimelineWindow(length: currentSong?.playLength ?? 1)
             }
         }
     }
@@ -614,6 +614,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// How long a song plays: what's loaded for the cued song, else its audio's measured length,
+    /// else the sheet's.
+    func playLength(of song: Song) -> Double {
+        if song.id == currentSong?.id, transport.length > 0 { return transport.length }
+        return song.playLength ?? 0
+    }
+
     /// The timecode at the playhead.
     func timecode(for song: Song, at position: Double) -> Timecode {
         song.start.adding(frames: Int((position * song.rate.framesPerSecond + 1e-6).rounded(.down)))
@@ -701,7 +708,7 @@ final class AppModel: ObservableObject {
         let p = transport.position()
         let points = song.markers.filter { $0.laneID == nil }.map { seconds(of: $0, in: song) }.sorted()
         let start = points.last(where: { $0 <= p }) ?? 0
-        let end = points.first(where: { $0 > p }) ?? (song.length ?? transport.length)
+        let end = points.first(where: { $0 > p }) ?? playLength(of: song)
         guard end - start > 0.25 else { return }
         transport.setLoop(start...end)
     }
@@ -774,7 +781,7 @@ final class AppModel: ObservableObject {
         for song in songs where song.hasTimecode {
             guard let tc = Timecode(text, rate: song.rate) else { continue }
             let offset = Double(tc.frames(since: song.start)) / song.rate.framesPerSecond
-            if offset >= -song.fileOffset && offset <= (song.length ?? 0) {
+            if offset >= -song.fileOffset && offset <= (song.playLength ?? 0) {
                 if currentSong?.id != song.id { cue(song, play: false) }
                 transport.locate(offset)
                 return nil
@@ -900,7 +907,7 @@ final class AppModel: ObservableObject {
     }
 
     func move(_ marker: Marker, in song: Song, to seconds: Double) {
-        let tc = timecode(for: song, at: max(0, min(seconds, song.length ?? seconds)))
+        let tc = timecode(for: song, at: max(0, min(seconds, playLength(of: song))))
         updateMarker(marker, in: song) { $0.time = tc }
     }
 
@@ -1082,7 +1089,8 @@ final class AppModel: ObservableObject {
     func shiftSelected(frames: Int) {
         guard let song = currentSong, !locked, frames != 0, !selectedMarkerIDs.isEmpty else { return }
         rememberMarkers(of: song)
-        let maxFrames = song.length.map { Int($0 * song.rate.framesPerSecond) }
+        let len = playLength(of: song)
+        let maxFrames: Int? = len > 0 ? Int(len * song.rate.framesPerSecond) : nil
         edit { show in
             guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
             for m in show.songs[i].markers.indices where selectedMarkerIDs.contains(show.songs[i].markers[m].id) {
@@ -1142,7 +1150,7 @@ final class AppModel: ObservableObject {
     func zoomTimeline(by factor: Double) {
         guard let song = currentSong else { return }
         var w = timelineWindow
-        w.length = max(0.001, song.length ?? 1)
+        w.length = max(0.001, playLength(of: song))
         let p = transport.position()
         w.zoom(by: factor, around: w.contains(p) ? p : w.start + w.span / 2)
         withAnimation(.vivid(0.3)) { timelineWindow = w }
@@ -1516,6 +1524,8 @@ final class AppModel: ObservableObject {
             for (i, song) in current.songs.enumerated() {
                 guard let fresh = checked.song(id: song.id) else { continue }
                 if song.length == nil { current.songs[i].length = fresh.length }
+                // Measured every time: the audio decides how long the song plays.
+                current.songs[i].audioLength = fresh.audioLength
                 if song.timecodeFileChannel == nil { current.songs[i].timecodeFileChannel = fresh.timecodeFileChannel }
             }
             self.show = current
@@ -1695,7 +1705,7 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 600_000_000)
             transport.locate(9.4)
             if zoomIn, let song = currentSong {
-                var w = TimelineWindow(length: song.length ?? 24)
+                var w = TimelineWindow(length: playLength(of: song))
                 w.setZoom(3, around: 9.4)
                 timelineWindow = w
                 // A box selection across the lanes, between 10 and 18 seconds.

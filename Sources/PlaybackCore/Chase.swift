@@ -119,7 +119,7 @@ public struct ChaseEngine: Sendable {
         for song in songs where song.hasTimecode {
             let t = Timecode(tc.description, rate: song.rate) ?? Timecode(seconds: tc.seconds, rate: song.rate)
             let seconds = Double(t.frames(since: song.start)) / song.rate.framesPerSecond
-            if seconds >= -song.fileOffset && seconds < (song.length ?? .infinity) { return (song, seconds) }
+            if seconds >= -song.fileOffset && seconds < (song.playLength ?? .infinity) { return (song, seconds) }
         }
         return nil
     }

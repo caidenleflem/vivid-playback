@@ -399,3 +399,15 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 - With Up Next folded, the player is centred in the whole window and the Next card floats in the
   corner; unfolding gives the queue a column and the player glides over (0.4 s, crossfade under
   Reduce Motion).
+
+## 2026-11-11: songs play their whole audio
+
+- Bug: a song stopped at the sheet's length even when its audio ran longer (or ran on in silence
+  when shorter). Now the sheet's length is only the starting point: each check measures the audio
+  (`Song.audioLength`, the longer of master and timecode file) and `Song.playLength` is the audio's
+  length from the song's start, falling back to the sheet only before any audio is assigned
+  (tested). The transport ends at the loaded audio's end; the song list, timeline, player, Up Next,
+  setlist durations, sorting and following incoming timecode all use the same length. The sheet's
+  own value is kept as it was (never changed silently). A song with only a timecode file plays
+  for as long as that file.
+- 101 tests pass.

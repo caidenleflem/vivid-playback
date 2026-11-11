@@ -42,6 +42,17 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     public var markers: [Marker]
     /// This song's executor lanes: each fires one MA3 executor from the triggers on it.
     public var triggerLanes: [TriggerLane]? = nil
+    /// How long the song's audio actually is, in seconds of file (the longer of the master and
+    /// the timecode file), measured each time the files are checked. Nil with no audio.
+    public var audioLength: Double? = nil
+
+    /// How long the song plays, from its start: the audio's own length once it has audio (longer
+    /// or shorter than the sheet said), the sheet's length until then. The sheet is a starting
+    /// point, not an end point.
+    public var playLength: Double? {
+        if let audio = audioLength, audio > 0 { return max(0, audio - fileOffset) }
+        return length
+    }
 
     public init(id: UUID = UUID(), number: Int? = nil, title: String, start: Timecode, fileOffset: Double = 0,
                 length: Double? = nil, masterPath: String? = nil, timecodePath: String? = nil,

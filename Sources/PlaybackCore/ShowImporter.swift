@@ -185,7 +185,10 @@ public struct ShowImporter: Sendable {
                     report.readErrors.append("\(url.lastPathComponent): \(error)")
                 }
             }
-            // The song runs to the end of the master unless the sheet says otherwise.
+            // How long the audio really is: playback runs to its end, whatever the sheet said.
+            let durations = [report.master?.duration, report.timecode?.duration].compactMap { $0 }.filter { $0 > 0 }
+            show.songs[i].audioLength = durations.max()
+            // A sheet without a length takes the master's, for the checks that compare against it.
             if show.songs[i].length == nil, let m = report.master {
                 show.songs[i].length = max(0, m.duration - song.fileOffset)
             }

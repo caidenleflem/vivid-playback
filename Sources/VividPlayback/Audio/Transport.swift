@@ -44,7 +44,14 @@ final class Transport: ObservableObject {
     private var generation = 0
     var onSongEnd: (() -> Void)?
 
-    var length: Double { song?.length ?? buffers.map { $0.duration - (song?.fileOffset ?? 0) } ?? 0 }
+    /// How long the song plays: the loaded audio when it's this song's (so a song runs to the end
+    /// of its files, whatever the sheet said), else the measured or sheet length.
+    var length: Double {
+        if let b = buffers, buffersSongID == song?.id { return max(0, b.duration - (song?.fileOffset ?? 0)) }
+        return song?.playLength ?? 0
+    }
+    /// Which song `buffers` holds (it lags behind `song` while the next one loads).
+    private var buffersSongID: UUID?
     var lowerBound: Double { -(song?.fileOffset ?? 0) }
     var usesAudio: Bool { buffers != nil && audio.isRunning }
     var deviceName: String? { audio.device?.name }
@@ -160,6 +167,7 @@ final class Transport: ObservableObject {
         audio.state.playing = false
         audio.state.buffers = b
         buffers = b
+        buffersSongID = song?.id
         timecodeGenerated = b.timecodeGenerated
         source = b.source
         trackFound = b.ltc != nil

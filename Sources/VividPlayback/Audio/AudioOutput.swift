@@ -209,8 +209,10 @@ enum SongLoader {
             }
         }
         if master.isEmpty {
+            // No master: silence as long as the timecode file, or the sheet's length when there's
+            // no audio at all yet.
             let seconds = (song.length ?? 0) + song.fileOffset
-            let frames = max(timecode?.count ?? 0, Int(seconds * sampleRate))
+            let frames = timecode?.count ?? Int(seconds * sampleRate)
             master = [[Float](repeating: 0, count: frames)]
         }
         let b = PlaybackBuffers.prepare(song: song, sampleRate: sampleRate, master: master, timecode: timecode,

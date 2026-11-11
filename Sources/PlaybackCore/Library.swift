@@ -41,7 +41,7 @@ extension Setlist {
                 default: return a.1.start.seconds == b.1.start.seconds ? a.0 < b.0 : a.1.start.seconds < b.1.start.seconds
                 }
             case .length:
-                switch (a.1.length, b.1.length) {
+                switch (a.1.playLength, b.1.playLength) {
                 case let (x?, y?) where x != y: return x < y
                 case (_?, nil): return true
                 case (nil, _?): return false
@@ -87,7 +87,7 @@ extension Setlist {
 
     /// Total running time of the songs played tonight.
     public func duration(in show: Show) -> Double {
-        songIDs.filter { !skipped.contains($0) }.compactMap { show.song(id: $0)?.length }.reduce(0, +)
+        songIDs.filter { !skipped.contains($0) }.compactMap { show.song(id: $0)?.playLength }.reduce(0, +)
     }
 }
 
