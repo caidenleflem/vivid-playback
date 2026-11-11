@@ -624,3 +624,14 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - The OSC card has a **Heard** list: the last 8 messages that arrived, who sent them, and what
   the app made of each ("not a Vivid command" in amber), so a wrong address, port or network
   shows at once.
+
+## 2026-11-11: Vivid Labels plugin
+
+- Caiden wanted the desk's names on the lanes. **Vivid Labels** (saved with Vivid Recorder by
+  Playback › Save grandMA3 Plugins…): run it on a fader page and it sends
+  `/vivid/label "3.201" "Verse wash"` for each executor with a named sequence (quotes, commas and
+  semicolons dropped). The app names every lane that fires that page and executor, in every song,
+  and gathers the page into one notice with one Undo ("Named 6 lanes after the desk's sequences, in
+  12 songs. No lane fires 3.207 yet."). Run against a mock desk: only real, named sequences are sent.
+- Core: `DeskLabel` (reading it, naming the lanes), `DeskPlugin.Labels`. 166 tests pass.
+- **Needs a check on the desk:** the sequence's `Name` reads as expected.

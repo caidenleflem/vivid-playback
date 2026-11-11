@@ -71,3 +71,32 @@ final class DeskSequenceTests: XCTestCase {
         XCTAssertTrue(files[0].contents.contains(#"FileName="VividRecorder.lua""#))
     }
 }
+
+final class DeskLabelTests: XCTestCase {
+    func testReadsANameAndNamesEveryLaneForThatExecutor() throws {
+        let l = try XCTUnwrap(DeskLabel.from(OSCMessage("/gma3/vivid/label", [.string("3.201"), .string("Verse wash")])))
+        XCTAssertEqual(l, DeskLabel(page: 3, executor: 201, name: "Verse wash"))
+        XCTAssertNil(DeskLabel.from(OSCMessage("/vivid/label", [.string("201"), .string("x")])), "needs the page")
+        XCTAssertNil(DeskLabel.from(OSCMessage("/vivid/label", [.string("3.201"), .string(" ")])))
+
+        let start = Timecode("01:00:00:00", rate: .fps30)!
+        var a = Song(title: "A", start: start), b = Song(title: "B", start: start), c = Song(title: "C", start: start)
+        a.triggerLanes = [TriggerLane(page: 3, executor: 201), TriggerLane(page: 3, executor: 202)]
+        b.triggerLanes = [TriggerLane(name: "Old", page: 3, executor: 201)]
+        c.triggerLanes = [TriggerLane(page: 1, executor: 201)]
+        var songs = [a, b, c]
+        let r = l.apply(to: &songs)
+        XCTAssertEqual(r.lanes, 2); XCTAssertEqual(r.songs, 2)
+        XCTAssertEqual(songs[0].triggerLanes?[0].name, "Verse wash")
+        XCTAssertEqual(songs[0].triggerLanes?[1].name, "", "another executor isn't touched")
+        XCTAssertEqual(songs[1].triggerLanes?[0].name, "Verse wash")
+        XCTAssertEqual(songs[2].triggerLanes?[0].name, "", "same executor on another page isn't touched")
+        XCTAssertEqual(l.apply(to: &songs).lanes, 0, "already named")
+    }
+
+    func testBothPluginsSave() {
+        let names = DeskPlugin.allFiles().map(\.name)
+        XCTAssertEqual(names, ["VividRecorder.xml", "VividRecorder.lua", "VividLabels.xml", "VividLabels.lua"])
+        XCTAssertTrue(DeskPlugin.Labels.lua(oscLine: 3).contains("local OSC_LINE = 3"))
+    }
+}

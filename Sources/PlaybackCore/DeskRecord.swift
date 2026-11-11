@@ -179,3 +179,45 @@ extension DeskRecorder {
         lanes.first { $0.page == event.page && $0.executor == event.executor }
     }
 }
+
+/// A sequence's name from the desk (the Vivid Labels plugin): `/vivid/label "3.201" "Verse wash"`.
+public struct DeskLabel: Equatable, Sendable {
+    public var page: Int
+    public var executor: Int
+    public var name: String
+
+    public init(page: Int, executor: Int, name: String) {
+        self.page = page
+        self.executor = executor
+        self.name = name
+    }
+
+    public static func from(_ m: OSCMessage) -> DeskLabel? {
+        guard m.vividCommand == "label", m.arguments.count >= 2,
+              let ref = DeskGo.executorRef(m.arguments[0].text), let page = ref.page else { return nil }
+        let name = m.arguments.dropFirst().map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return nil }
+        return DeskLabel(page: page, executor: ref.executor, name: name)
+    }
+
+    /// Names every lane that fires this executor, in every song. Returns how many lanes got a new
+    /// name and in how many songs.
+    @discardableResult
+    public func apply(to songs: inout [Song]) -> (lanes: Int, songs: Int) {
+        var lanes = 0, touched = 0
+        for s in songs.indices {
+            guard var list = songs[s].triggerLanes else { continue }
+            var changed = false
+            for l in list.indices where list[l].page == page && list[l].executor == executor && list[l].name != name {
+                list[l].name = name
+                lanes += 1
+                changed = true
+            }
+            if changed {
+                songs[s].triggerLanes = list
+                touched += 1
+            }
+        }
+        return (lanes, touched)
+    }
+}

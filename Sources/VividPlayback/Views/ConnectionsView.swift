@@ -419,9 +419,9 @@ struct ConnectionsView: View {
                                 Text("★").font(.manrope(11, .bold)).foregroundStyle(Brand.gold)
                                     .frame(width: 18, height: 18).background(Circle().fill(Brand.gold.opacity(0.12)))
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("Best: the Vivid Recorder plugin. It watches the sequences on the fader page you're on and sends what each one does (Go+, Go-, Goto, Top, On, Off). OSC in must be on here, and the desk's OSC line needs Send on.")
+                                    Text("Best: the Vivid Recorder plugin. It watches the sequences on the fader page you're on and sends what each one does (Go+, Go-, Goto, Top, On, Off). Vivid Labels, run on a page, names the lanes after its sequences. OSC in must be on here, and the desk's OSC line needs Send on.")
                                         .font(.manrope(12.5)).foregroundStyle(Brand.steel).fixedSize(horizontal: false, vertical: true)
-                                    Button("Save grandMA3 Plugin…") { model.saveDeskPlugin() }.buttonStyle(QuietButtonStyle())
+                                    Button("Save grandMA3 Plugins…") { model.saveDeskPlugin() }.buttonStyle(QuietButtonStyle())
                                 }
                             }
                             step(1, "Timeline › Record desk (⇧⌘R), then play the song. It stays on that song.")

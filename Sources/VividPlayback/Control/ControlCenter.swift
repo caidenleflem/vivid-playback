@@ -196,6 +196,8 @@ final class ControlCenter: ObservableObject {
     var onDeskGo: ((DeskGo) -> Void)?
     /// A sequence on the desk changed cue, from the Vivid Recorder plugin.
     var onDeskSequence: ((DeskSequenceEvent) -> Void)?
+    /// A sequence's name from the desk, from the Vivid Labels plugin.
+    var onDeskLabel: ((DeskLabel) -> Void)?
     private var mscIn: UDPSocket?
     @Published private(set) var deskStatus = ""
     var onFollow: (([ChaseEngine.Action]) -> Void)?
@@ -294,6 +296,11 @@ final class ControlCenter: ObservableObject {
                 if messages.isEmpty { self.heard("\(data.count) bytes that aren't OSC", from: from, meaning: nil) }
                 for m in messages {
                     let text = ([m.address] + m.arguments.map(\.text)).joined(separator: " ")
+                    if let label = DeskLabel.from(m) {
+                        self.heard(text, from: from, meaning: "desk name \(label.page).\(label.executor)")
+                        self.onDeskLabel?(label)
+                        continue
+                    }
                     if let event = DeskSequenceEvent.from(m) {
                         self.heard(text, from: from, meaning: "desk: \(event.page).\(event.executor) \(event.action.label)")
                         self.onDeskSequence?(event)

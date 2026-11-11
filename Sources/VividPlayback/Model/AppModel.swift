@@ -222,6 +222,7 @@ final class AppModel: ObservableObject {
         control.onTriggerSettingsChange = { [weak self] in self?.syncTriggers() }
         control.onDeskGo = { [weak self] go in self?.deskGo(go) }
         control.onDeskSequence = { [weak self] event in self?.deskSequence(event) }
+        control.onDeskLabel = { [weak self] label in self?.deskLabel(label) }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .magnify]) { [weak self] event in
             guard let self else { return event }
             return self.handle(event) ? nil : event
@@ -1022,21 +1023,76 @@ final class AppModel: ObservableObject {
         lastDeskGo = ("\(from) → \(lane.title) at \(marker.time)", Date())
     }
 
-    /// Writes the Vivid Recorder plugin for the grandMA3 (its XML and Lua) into a folder, for a
-    /// USB stick's grandMA3_library/plugins.
+    /// Names arriving from the desk's Vivid Labels plugin, gathered so one notice (with one Undo)
+    /// covers the whole page.
+    private var labelBatch: (before: [UUID: [TriggerLane]], lanes: Int, songs: Set<UUID>, unmatched: [String])?
+    private var labelBatchTimer: Timer?
+
+    /// The desk sent a sequence's name: every lane that fires that executor, in every song of the
+    /// show, takes it.
+    func deskLabel(_ label: DeskLabel) {
+        guard !locked, var show else { return }
+        if labelBatch == nil {
+            var before: [UUID: [TriggerLane]] = [:]
+            for s in show.songs { if let l = s.triggerLanes { before[s.id] = l } }
+            labelBatch = (before, 0, [], [])
+        }
+        let beforeSongs = show.songs
+        let result = label.apply(to: &show.songs)
+        if result.lanes > 0 {
+            for (old, new) in zip(beforeSongs, show.songs) where old.triggerLanes != new.triggerLanes {
+                labelBatch?.songs.insert(new.id)
+            }
+            labelBatch?.lanes += result.lanes
+            self.show = show
+            if let song = currentSong { transport.update(song, in: show) }
+            save()
+        } else if !show.songs.contains(where: { ($0.triggerLanes ?? []).contains { $0.page == label.page && $0.executor == label.executor } }) {
+            labelBatch?.unmatched.append("\(label.page).\(label.executor)")
+        }
+        labelBatchTimer?.invalidate()
+        labelBatchTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.finishLabelBatch() }
+        }
+    }
+
+    private func finishLabelBatch() {
+        guard let batch = labelBatch else { return }
+        labelBatch = nil
+        var text = batch.lanes == 0
+            ? "The desk's names are already on the lanes."
+            : "Named \(batch.lanes) lane\(batch.lanes == 1 ? "" : "s") after the desk's sequences, in \(batch.songs.count) song\(batch.songs.count == 1 ? "" : "s")."
+        if !batch.unmatched.isEmpty {
+            let list = batch.unmatched.prefix(4).joined(separator: ", ") + (batch.unmatched.count > 4 ? "…" : "")
+            text += " No lane fires \(list) yet."
+        }
+        guard batch.lanes > 0 else { post(text); return }
+        postUndo(text) { [weak self] in
+            guard let self, !self.locked, var show = self.show else { return }
+            for i in show.songs.indices where batch.songs.contains(show.songs[i].id) {
+                show.songs[i].triggerLanes = batch.before[show.songs[i].id]
+            }
+            self.show = show
+            if let song = self.currentSong { self.transport.update(song, in: show) }
+            self.save()
+        }
+    }
+
+    /// Writes the grandMA3 plugins (Vivid Recorder and Vivid Labels, each an XML and a Lua) into a
+    /// folder, for a USB stick's grandMA3_library/plugins.
     func saveDeskPlugin() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Save Here"
-        panel.message = "Choose where to save the Vivid Recorder plugin. On a USB stick for the desk: grandMA3_library › plugins."
+        panel.message = "Choose where to save the grandMA3 plugins. On a USB stick for the desk: grandMA3_library › plugins."
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         do {
-            for f in DeskPlugin.files(oscLine: 1) {
+            for f in DeskPlugin.allFiles(oscLine: 1) {
                 try f.contents.write(to: folder.appendingPathComponent(f.name), atomically: true, encoding: .utf8)
             }
-            post("Saved VividRecorder.xml and .lua. On the desk: import the plugin, then run it to start recording and again to stop. It sends on OSC line 1; change OSC_LINE at the top of the .lua if yours is another.")
+            post("Saved Vivid Recorder (run to start recording, again to stop) and Vivid Labels (run on a page to name the lanes after its sequences). Both send on OSC line 1; change OSC_LINE at the top of each .lua if yours is another.")
             NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent("\(DeskPlugin.name).xml")])
         } catch {
             post("Couldn't save the plugin: \(error.localizedDescription)")

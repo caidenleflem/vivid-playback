@@ -12,6 +12,93 @@ public enum DeskPlugin {
         [("\(name).xml", xml), ("\(name).lua", lua(oscLine: oscLine))]
     }
 
+    /// Both plugins' files: the recorder and Vivid Labels.
+    public static func allFiles(oscLine: Int = 1) -> [(name: String, contents: String)] {
+        files(oscLine: oscLine) + Labels.files(oscLine: oscLine)
+    }
+
+    /// Vivid Labels: run it on the desk and it sends the name of every sequence on the fader page
+    /// you're on, so Vivid Playback can name the lanes that fire those executors.
+    public enum Labels {
+        public static let name = "VividLabels"
+
+        public static func files(oscLine: Int = 1) -> [(name: String, contents: String)] {
+            [("\(name).xml", xml), ("\(name).lua", lua(oscLine: oscLine))]
+        }
+
+        public static let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <GMA3 DataVersion="2.3.2.0">
+        \t<Plugin Name="Vivid Labels" Version="1.0.0.0">
+        \t\t<ComponentLua Name="\(name)" FileName="\(name).lua" />
+        \t</Plugin>
+        </GMA3>
+
+        """
+
+        public static func lua(oscLine: Int = 1) -> String {
+            luaTemplate.replacingOccurrences(of: "__OSC_LINE__", with: String(max(1, oscLine)))
+        }
+
+        static let luaTemplate = #"""
+        -- Vivid Labels for grandMA3 (made for 2.3)
+        -- Run it on the fader page you want: it sends the name of each executor's sequence to
+        -- Vivid Playback, which names the lanes that fire those executors.
+        -- OSC_LINE is the line in Menu > In & Out > OSC that sends to the Mac running Vivid Playback.
+
+        local OSC_LINE = __OSC_LINE__
+
+        local function prop(h, key)
+          if h == nil then return nil end
+          local ok, v = pcall(function() return h:Get(key) end)
+          if ok and v ~= nil then return v end
+          ok, v = pcall(function() return h[key] end)
+          if ok then return v end
+          return nil
+        end
+
+        local function children(h)
+          local ok, list = pcall(function() return h:Children() end)
+          if ok and type(list) == "table" then return list end
+          return {}
+        end
+
+        local function className(h)
+          local ok, c = pcall(function() return h:GetClass() end)
+          if ok then return tostring(c) end
+          return ""
+        end
+
+        -- Text that can't break the OSC command: no quotes, commas or semicolons.
+        local function clean(s)
+          s = tostring(s or "")
+          s = s:gsub('[",;]', " "):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "")
+          return s
+        end
+
+        local function Main(display, argument)
+          local page = CurrentExecPage()
+          local pageNo = tonumber(prop(page, "No")) or 1
+          local sent = 0
+          for _, exec in ipairs(children(page)) do
+            local seq = prop(exec, "Object")
+            local no = tonumber(prop(exec, "No"))
+            if seq ~= nil and no ~= nil and className(seq) == "Sequence" then
+              local name = clean(prop(seq, "Name"))
+              if name ~= "" then
+                Cmd(string.format('SendOSC %d "/vivid/label,ss,%d.%d,%s"', OSC_LINE, pageNo, no, name))
+                sent = sent + 1
+                coroutine.yield(0.01)
+              end
+            end
+          end
+          Printf("Vivid Labels sent %d name%s from page %d on OSC line %d.", sent, sent == 1 and "" or "s", pageNo, OSC_LINE)
+        end
+
+        return Main
+        """#
+    }
+
     public static let xml = """
     <?xml version="1.0" encoding="UTF-8"?>
     <GMA3 DataVersion="2.3.2.0">
