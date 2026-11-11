@@ -635,3 +635,6 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   12 songs. No lane fires 3.207 yet."). Run against a mock desk: only real, named sequences are sent.
 - Core: `DeskLabel` (reading it, naming the lanes), `DeskPlugin.Labels`. 166 tests pass.
 - **Needs a check on the desk:** the sequence's `Name` reads as expected.
+- GitHub's backup builds kept waiting 15 minutes for a Mac and being cancelled (never a compile
+  failure; Caiden's own builds compile). The workflow now builds only the newest push (older
+  waiting ones are dropped) and skips pushes that only change notes (docs, .md).

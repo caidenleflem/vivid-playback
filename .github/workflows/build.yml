@@ -5,7 +5,16 @@ name: Build
 on:
   push:
     branches: [main]
+    # Notes and rules only: nothing to build.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
+
+# Only the newest push builds: an older one still waiting for a Mac is dropped.
+concurrency:
+  group: build-main
+  cancel-in-progress: true
 
 permissions:
   contents: write
