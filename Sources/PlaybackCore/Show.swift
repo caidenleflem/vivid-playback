@@ -101,20 +101,28 @@ public struct OutputRouting: Codable, Hashable, Sendable {
     public var deviceUID: String?
     /// 1-based output channels for the master (usually a pair).
     public var masterChannels: [Int]
-    /// 1-based output channel for timecode; nil until chosen.
+    /// 1-based output channel for timecode; nil until chosen. On `timecodeDeviceUID` when set.
     public var timecodeChannel: Int?
+    /// The interface timecode goes out on, when it isn't the master's; nil means the master's.
+    public var timecodeDeviceUID: String?
     public var masterGainDB: Double
     /// Fixed timecode level; the master volume never changes it.
     public var timecodeGainDB: Double
 
     public init(deviceUID: String? = nil, masterChannels: [Int] = [1, 2], timecodeChannel: Int? = nil,
-                masterGainDB: Double = 0, timecodeGainDB: Double = -6) {
+                timecodeDeviceUID: String? = nil, masterGainDB: Double = 0, timecodeGainDB: Double = -6) {
         self.deviceUID = deviceUID
         self.masterChannels = masterChannels
         self.timecodeChannel = timecodeChannel
+        self.timecodeDeviceUID = timecodeDeviceUID
         self.masterGainDB = masterGainDB
         self.timecodeGainDB = timecodeGainDB
     }
+}
+
+extension OutputRouting {
+    /// Master and timecode go out on two different interfaces.
+    public var splitsInterfaces: Bool { timecodeDeviceUID != nil && timecodeDeviceUID != deviceUID }
 }
 
 public struct Show: Codable, Hashable, Sendable {

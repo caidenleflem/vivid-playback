@@ -175,16 +175,21 @@ struct OutputsBox: View {
                     StatusDot(color: live ? Brand.ok : Brand.graphite)
                     Text("Master · \(channels(routing.masterChannels))")
                 }
-                if live, let m = routing.masterChannels.first, m >= 1, m <= 64 {
-                    LevelMeter(level: meters.levels[m - 1], hold: meters.holds[m - 1], height: 4)
+                if live, let m = transport.masterOutput, m < 64 {
+                    LevelMeter(level: meters.levels[m], hold: meters.holds[m], height: 4)
                 }
                 HStack(spacing: 8) {
                     StatusDot(color: live && transport.timecodeRouted ? (transport.isPlaying ? Brand.ok : Brand.gold) : Brand.warn,
                               pulsing: live && transport.timecodeRouted && transport.isPlaying)
-                    Text(routing.timecodeChannel.map { "Timecode · Out \($0)" } ?? "Timecode · not set")
+                    Text(routing.timecodeChannel.map { c in
+                        routing.splitsInterfaces
+                            ? "Timecode · \(transport.interfaces.count > 1 ? transport.interfaces[1].name : "other interface") Out \(c)"
+                            : "Timecode · Out \(c)"
+                    } ?? "Timecode · not set")
+                    .lineLimit(1)
                 }
-                if live, let t = routing.timecodeChannel, t >= 1, t <= 64 {
-                    LevelMeter(level: meters.levels[t - 1], hold: meters.holds[t - 1], height: 4)
+                if live, let t = transport.timecodeOutput, t < 64 {
+                    LevelMeter(level: meters.levels[t], hold: meters.holds[t], height: 4)
                 }
                 let extras = [control.settings.mtcOut ? "MTC" : nil, control.settings.artNetOut ? "Art-Net" : nil].compactMap { $0 }
                 if !extras.isEmpty || control.isFollowing {

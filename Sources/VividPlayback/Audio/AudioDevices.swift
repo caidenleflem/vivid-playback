@@ -31,7 +31,10 @@ struct AudioDevice: Identifiable, Hashable {
 
 /// Core Audio's list of output devices.
 enum AudioDevices {
-    static func all() -> [AudioDevice] {
+    /// The interfaces to choose from. The joined devices the app makes for itself are left out.
+    static func all() -> [AudioDevice] { everything().filter { !$0.uid.hasPrefix(joinedPrefix) } }
+
+    private static func everything() -> [AudioDevice] {
         var addr = address(kAudioHardwarePropertyDevices)
         var size: UInt32 = 0
         let system = AudioObjectID(kAudioObjectSystemObject)
@@ -39,6 +42,59 @@ enum AudioDevices {
         var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
         guard AudioObjectGetPropertyData(system, &addr, 0, nil, &size, &ids) == noErr else { return [] }
         return ids.compactMap(device(id:))
+    }
+
+    // MARK: Master and timecode on two interfaces
+
+    private static let joinedPrefix = "com.vividplayback.joined."
+
+    /// Two interfaces played as one, so the master and the timecode still come from one frame
+    /// counter: the master's interface first (it's the clock), then the timecode interface, kept
+    /// in step with it by Core Audio's drift correction. It's the same thing as an aggregate
+    /// device in Audio MIDI Setup, made the same way every time. Private: only this app sees it,
+    /// and it goes away when the app quits. Nil if Core Audio won't make it.
+    static func joined(master: AudioDevice, timecode: AudioDevice) -> AudioDevice? {
+        let uid = joinedPrefix + "\(master.uid)+\(timecode.uid)"
+        if let existing = everything().first(where: { $0.uid == uid }),
+           existing.outputChannels == master.outputChannels + timecode.outputChannels {
+            return existing
+        }
+        // Core Audio's aggregate keys, spelled out ("master" is the clock sub-device).
+        let description: [String: Any] = [
+            "uid": uid,
+            "name": "Vivid Playback · \(master.name) + \(timecode.name)",
+            "private": 1,
+            "stacked": 0,
+            "master": master.uid,
+            "subdevices": [
+                ["uid": master.uid, "drift": 0],
+                ["uid": timecode.uid, "drift": 1, "drift quality": 0x7F],
+            ],
+        ]
+        var id = AudioObjectID(0)
+        guard AudioHardwareCreateAggregateDevice(description as CFDictionary, &id) == noErr, id != 0 else { return nil }
+        // Run both at the master's rate.
+        if master.sampleRate > 0 {
+            var addr = address(kAudioDevicePropertyNominalSampleRate)
+            var rate = Float64(master.sampleRate)
+            _ = AudioObjectSetPropertyData(id, &addr, 0, nil, UInt32(MemoryLayout<Float64>.size), &rate)
+        }
+        // Core Audio finishes setting it up a moment later.
+        let expected = master.outputChannels + timecode.outputChannels
+        for _ in 0..<50 {
+            if let d = device(id: id), d.outputChannels >= expected { return d }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if let d = device(id: id), d.outputChannels > 0 { return d }
+        _ = AudioHardwareDestroyAggregateDevice(id)
+        return nil
+    }
+
+    /// Removes the joined devices the app made, except `keeping`.
+    static func removeJoined(keeping uid: String? = nil) {
+        for d in everything() where d.uid.hasPrefix(joinedPrefix) && d.uid != uid {
+            _ = AudioHardwareDestroyAggregateDevice(d.id)
+        }
     }
 
     static func defaultOutput() -> AudioDevice? {
@@ -50,6 +106,9 @@ enum AudioDevices {
     }
 
     static func device(uid: String) -> AudioDevice? { all().first { $0.uid == uid } }
+
+    /// Every interface present, including a joined one the app is playing on.
+    static func presentUIDs() -> Set<String> { Set(everything().map(\.uid)) }
 
     /// Devices with inputs (for reading incoming LTC).
     static func inputs() -> [AudioDevice] {

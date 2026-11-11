@@ -460,3 +460,27 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
   timecode switching on the same sample as the master.
 - **Needs a check on the Mac:** auto-advance between two real songs, a mid-song switch on a loud
   master (no click), and memory use with a full set loaded (Activity Monitor).
+
+## 2026-11-11: master and timecode on different interfaces
+
+Caiden's aggregate device wasn't working, and he asked to pick separate interfaces for the
+master and for LTC.
+- Audio output now has **Master interface** and **Timecode interface** ("Same as the master", or
+  any other interface), and the timecode output list shows the chosen interface's outputs and
+  names.
+- With two interfaces, the app joins them into one private device of its own (Core Audio's
+  aggregate, built the same way every time): the master's interface is the clock, the timecode
+  interface is kept in step by drift correction, and both run at the master's sample rate. Only
+  this app sees it, and it goes away when the app quits. The engine still renders the master and
+  timecode from one frame counter; the sheet says that a word clock (or Dante on both) gives a
+  perfect lock.
+- Core: `OutputRouting.timecodeDeviceUID` (older shows load with timecode on the master's
+  interface), `OutputMap(routing:slots:)`. A timecode channel the other interface doesn't have,
+  or a timecode interface that isn't connected, sends no timecode: it's never moved onto the
+  master's interface. 7 tests; 132 pass.
+- Unplugging either interface stops playback and says which one. One that comes back mid-song is
+  used once playback stops (the audio never restarts mid-song).
+- Meters, the Outputs box and the LTC card follow the real outputs and name the timecode interface.
+- **Needs a check on the Mac:** both interfaces show up and play; timecode on the second one reads
+  on the desk across a full song with no drift; latency between the two (loop the LTC back, or
+  compare with the clock). If Core Audio won't join them, the sheet says so and no timecode goes out.

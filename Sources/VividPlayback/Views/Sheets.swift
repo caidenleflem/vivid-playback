@@ -49,12 +49,16 @@ struct OutputSheet: View {
 
     var body: some View {
         let routing = model.show?.routing ?? OutputRouting()
-        let device = model.devices.first { $0.uid == routing.deviceUID } ?? model.devices.first { $0.uid == transport.audio.device?.uid }
+        let device = model.devices.first { $0.uid == routing.deviceUID }
+            ?? model.devices.first { $0.uid == (transport.interfaces.first?.uid ?? transport.audio.device?.uid) }
         let channels = max(2, device?.outputChannels ?? transport.audio.channelCount)
+        let split = routing.splitsInterfaces && routing.timecodeDeviceUID != device?.uid
+        let tcDevice = split ? model.devices.first { $0.uid == routing.timecodeDeviceUID } : device
+        let tcChannels = split ? max(1, tcDevice?.outputChannels ?? 2) : channels
         SheetFrame(title: "Audio output",
                    subtitle: "Where the master plays and where timecode goes out. It's saved with the show, and the timecode level never follows the master level.") {
             VStack(alignment: .leading, spacing: 14) {
-                FormRow(label: "Interface") {
+                FormRow(label: "Master interface") {
                     Picker("Interface", selection: Binding(
                         get: { routing.deviceUID ?? device?.uid ?? "" },
                         set: { uid in model.updateRouting { $0.deviceUID = uid } })) {
@@ -82,26 +86,61 @@ struct OutputSheet: View {
                     .labelsHidden()
                     .frame(width: 340)
                 }
-                FormRow(label: "Timecode") {
-                    Picker("Timecode", selection: Binding(
-                        get: { routing.timecodeChannel ?? 0 },
-                        set: { c in model.updateRouting { $0.timecodeChannel = c == 0 ? nil : c } })) {
-                        Text("Not sent").tag(0)
-                        ForEach(1...channels, id: \.self) { c in
-                            let label = device?.outputLabel(c) ?? "Output \(c)"
-                            Text(routing.masterChannels.contains(c) ? "\(label) (used by the master)" : label).tag(c)
+                FormRow(label: "Timecode interface") {
+                    Picker("Timecode interface", selection: Binding(
+                        get: { split ? (routing.timecodeDeviceUID ?? "") : "" },
+                        set: { uid in
+                            model.updateRouting { r in
+                                if uid.isEmpty || uid == r.deviceUID {
+                                    r.timecodeDeviceUID = nil
+                                    if let c = r.timecodeChannel, r.masterChannels.contains(c) { r.timecodeChannel = nil }
+                                } else {
+                                    r.timecodeDeviceUID = uid
+                                    let outputs = model.devices.first { $0.uid == uid }?.outputChannels ?? 1
+                                    r.timecodeChannel = min(max(1, r.timecodeChannel ?? 1), max(1, outputs))
+                                }
+                            }
+                        })) {
+                        Text("Same as the master").tag("")
+                        ForEach(model.devices.filter { $0.uid != device?.uid }) { d in
+                            Text("\(d.name)\(d.isDante ? " · Dante" : "") · \(d.outputChannels) outputs · \(Int(d.sampleRate)) Hz").tag(d.uid)
+                        }
+                        if split, tcDevice == nil, let uid = routing.timecodeDeviceUID {
+                            Text("The show's timecode interface (not connected)").tag(uid)
                         }
                     }
                     .labelsHidden()
                     .frame(width: 340)
                 }
-                if let d = device, d.isDante {
+                FormRow(label: "Timecode") {
+                    Picker("Timecode", selection: Binding(
+                        get: { routing.timecodeChannel ?? 0 },
+                        set: { c in model.updateRouting { $0.timecodeChannel = c == 0 ? nil : c } })) {
+                        Text("Not sent").tag(0)
+                        ForEach(1...tcChannels, id: \.self) { c in
+                            let label = tcDevice?.outputLabel(c) ?? "Output \(c)"
+                            Text(!split && routing.masterChannels.contains(c) ? "\(label) (used by the master)" : label).tag(c)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 340)
+                }
+                if let d = device, d.isDante, !split {
                     danteCard(d, routing: routing)
                 }
-                if let tc = routing.timecodeChannel, routing.masterChannels.contains(tc) {
+                if split {
+                    if let m = device, let t = tcDevice {
+                        note("The master plays on \(m.name) and timecode on \(t.name), as one device: \(m.name) is the clock and \(t.name) is kept in step with it. For a perfect lock, clock both from the same word clock, or put both on Dante.", warn: false)
+                        if m.sampleRate > 0, t.sampleRate > 0, m.sampleRate != t.sampleRate {
+                            note("\(t.name) is set to \(Int(t.sampleRate)) Hz and \(m.name) to \(Int(m.sampleRate)) Hz. The app asks \(t.name) to run at \(Int(m.sampleRate)) Hz; if it won't, set both to the same rate in Audio MIDI Setup.", warn: true)
+                        }
+                    } else {
+                        note("The show's timecode interface isn't connected, so no timecode is going out. Plug it in, or pick another.", warn: true)
+                    }
+                } else if let tc = routing.timecodeChannel, routing.masterChannels.contains(tc) {
                     note("Timecode can't share an output with the master. Pick another output, or put the master on one output (mono).", warn: true)
                 } else if channels <= 2 && routing.masterChannels.count == 2 {
-                    note("This interface has two outputs and the master uses both. For timecode, set the master to Output 1 only (mono) and timecode to Output 2.", warn: true)
+                    note("This interface has two outputs and the master uses both. For timecode, set the master to Output 1 only (mono) and timecode to Output 2, or pick another interface for timecode.", warn: true)
                 }
                 FormRow(label: "Timecode level") {
                     Slider(value: Binding(get: { routing.timecodeGainDB }, set: { v in model.updateRouting { $0.timecodeGainDB = v.rounded() } }),
@@ -116,9 +155,9 @@ struct OutputSheet: View {
                     Text("\(Int(routing.masterGainDB)) dB").font(.manrope(13).monospacedDigit()).foregroundStyle(Brand.ink).frame(width: 50, alignment: .trailing)
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    ChannelMeter(label: "Master", channel: routing.masterChannels.first.map { $0 - 1 })
-                    if routing.masterChannels.count > 1 { ChannelMeter(label: "", channel: routing.masterChannels[1] - 1) }
-                    ChannelMeter(label: "Timecode", channel: routing.timecodeChannel.map { $0 - 1 })
+                    ChannelMeter(label: "Master", channel: transport.masterOutput)
+                    if routing.masterChannels.count > 1 { ChannelMeter(label: "", channel: transport.masterRightOutput) }
+                    ChannelMeter(label: "Timecode", channel: transport.timecodeOutput)
                 }
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Brand.solid))
@@ -163,7 +202,7 @@ struct OutputSheet: View {
                 Spacer()
                 let ready = routing.masterChannels == [1, 2] && routing.timecodeChannel == 3
                 Button(ready ? "Set up for Dante ✓" : "Set up for Dante") {
-                    model.updateRouting { $0.masterChannels = [1, 2]; $0.timecodeChannel = 3 }
+                    model.updateRouting { $0.masterChannels = [1, 2]; $0.timecodeChannel = 3; $0.timecodeDeviceUID = nil }
                 }
                 .buttonStyle(QuietButtonStyle(prominent: !ready))
                 .disabled(ready || d.outputChannels < 3)

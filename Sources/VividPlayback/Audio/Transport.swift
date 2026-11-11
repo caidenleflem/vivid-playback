@@ -91,32 +91,61 @@ final class Transport: ObservableObject {
     private var buffersSongID: UUID?
     var lowerBound: Double { -(song?.fileOffset ?? 0) }
     var usesAudio: Bool { buffers != nil && audio.isRunning }
-    var deviceName: String? { audio.device?.name }
+    var deviceName: String? { interfaces.isEmpty ? audio.device?.name : interfaces.map(\.name).joined(separator: " + ") }
 
     // MARK: Output
 
+    /// The interfaces playing, in output order: the master's, then the timecode interface when
+    /// it's a different one.
+    private(set) var interfaces: [AudioDevice] = []
+    /// A routing to apply once playback stops (an interface came back mid-song).
+    private var pendingRouting: OutputRouting?
+
     /// Starts (or restarts) the interface the show is routed to. Never starts playback.
+    /// With timecode on a different interface, both are joined into one device so the master and
+    /// the timecode still come from one frame counter, the master's interface being the clock.
     func configure(routing: OutputRouting) {
+        pendingRouting = nil
         let wasPlaying = isPlaying
         if wasPlaying { pause() }
         let keep = position()
-        let device = routing.deviceUID.flatMap(AudioDevices.device(uid:)) ?? AudioDevices.defaultOutput()
-        guard let device else {
+        let master = routing.deviceUID.flatMap(AudioDevices.device(uid:)) ?? AudioDevices.defaultOutput()
+        guard let master else {
             audio.stop()
+            interfaces = []
             status = .clockOnly("No audio output found")
             return
         }
-        let rateChanged = audio.sampleRate != device.sampleRate
-        do {
-            if audio.device?.uid != device.uid || !audio.isRunning { try audio.start(on: device) }
-            if routing.deviceUID != nil && routing.deviceUID != device.uid {
-                status = .lost("The show's interface isn't connected. Playing on \(device.name).")
+        var target = master
+        var playing = [master]
+        var timecodeProblem: String?
+        if routing.splitsInterfaces, let uid = routing.timecodeDeviceUID, uid != master.uid {
+            if let tc = AudioDevices.device(uid: uid) {
+                if let joined = AudioDevices.joined(master: master, timecode: tc) {
+                    target = joined
+                    playing = [master, tc]
+                } else {
+                    timecodeProblem = "Couldn't play \(master.name) and \(tc.name) together, so no timecode is going out. Check both run at the same sample rate in Audio MIDI Setup."
+                }
             } else {
-                status = .playing(device: device.name)
+                timecodeProblem = "The timecode interface isn't connected, so no timecode is going out. The master plays on \(master.name)."
+            }
+        }
+        AudioDevices.removeJoined(keeping: target.uid)
+        let rateChanged = audio.sampleRate != target.sampleRate
+        do {
+            if audio.device?.uid != target.uid || !audio.isRunning { try audio.start(on: target) }
+            if routing.deviceUID != nil && routing.deviceUID != master.uid {
+                status = .lost("The show's interface isn't connected. Playing on \(master.name).")
+            } else if let timecodeProblem {
+                status = .lost(timecodeProblem)
+            } else {
+                status = .playing(device: playing.map(\.name).joined(separator: " + "))
             }
         } catch {
             status = .clockOnly(String(describing: error))
         }
+        interfaces = playing
         applyRouting(routing)
         if rateChanged { dropCache() }
         if let song, let show, rateChanged || buffers == nil || buffers?.sampleRate != audio.sampleRate {
@@ -128,26 +157,47 @@ final class Transport: ObservableObject {
     }
 
     func applyRouting(_ routing: OutputRouting) {
-        audio.state.map = OutputMap(routing: routing, channelCount: audio.channelCount)
+        let slots = interfaces.isEmpty
+            ? [OutputSlot(uid: routing.deviceUID ?? "", outputs: audio.channelCount)]
+            : interfaces.map { OutputSlot(uid: $0.uid, outputs: $0.outputChannels) }
+        var map = OutputMap(routing: routing, slots: slots)
+        // Never address an output the running device doesn't have.
+        map.channelCount = audio.channelCount
+        if let t = map.timecode, t >= audio.channelCount { map.timecode = nil }
+        if let l = map.masterLeft, l >= audio.channelCount { map.masterLeft = nil }
+        if let r = map.masterRight, r >= audio.channelCount { map.masterRight = nil }
+        audio.state.map = map
         audio.state.masterGain = Mixer.gain(dB: routing.masterGainDB)
         audio.state.timecodeGain = Mixer.gain(dB: routing.timecodeGainDB)
         timecodeRouted = audio.state.map.timecode != nil
     }
 
+    /// Where the master's left side and the timecode come out of the running device (0-based),
+    /// for the meters.
+    var masterOutput: Int? { audio.isRunning ? audio.state.map.masterLeft : nil }
+    var masterRightOutput: Int? { audio.isRunning ? audio.state.map.masterRight : nil }
+    var timecodeOutput: Int? { audio.isRunning ? audio.state.map.timecode : nil }
+    /// The interface timecode goes out on (the second one when they're split).
+    var timecodeInterface: AudioDevice? { interfaces.count > 1 ? interfaces[1] : interfaces.first }
+
     /// Called when interfaces are plugged in or out.
     func devicesChanged(routing: OutputRouting) {
-        let present = AudioDevices.all()
-        if let current = audio.device, !present.contains(where: { $0.uid == current.uid }) {
+        let present = AudioDevices.presentUIDs()
+        if audio.isRunning, let gone = interfaces.first(where: { !present.contains($0.uid) }) {
             pause()
             audio.stop()
-            status = .lost("\(current.name) disconnected. Playback stopped.")
+            status = .lost("\(gone.name) disconnected. Playback stopped.")
             return
         }
-        if case .lost = status, let uid = routing.deviceUID, present.contains(where: { $0.uid == uid }) {
-            configure(routing: routing)
-        } else if !audio.isRunning {
-            configure(routing: routing)
+        let wanted = [routing.deviceUID, routing.splitsInterfaces ? routing.timecodeDeviceUID : nil].compactMap { $0 }
+        let missingBefore = wanted.contains { uid in !interfaces.contains { $0.uid == uid } }
+        guard !audio.isRunning || (missingBefore && wanted.allSatisfy(present.contains)) else { return }
+        // Never restart the audio mid-song: an interface that comes back is used once it stops.
+        if isPlaying {
+            pendingRouting = routing
+            return
         }
+        configure(routing: routing)
     }
 
     // MARK: Songs
@@ -507,6 +557,7 @@ final class Transport: ObservableObject {
         }
         setRunning(false)
         syncClock()
+        if let routing = pendingRouting { configure(routing: routing) }
     }
 
     private func setRunning(_ on: Bool) {

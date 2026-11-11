@@ -789,7 +789,8 @@ final class AppModel: ObservableObject {
         change(&show.routing)
         self.show = show
         save()
-        if before.deviceUID != show.routing.deviceUID {
+        if before.deviceUID != show.routing.deviceUID || before.splitsInterfaces != show.routing.splitsInterfaces
+            || (show.routing.splitsInterfaces && before.timecodeDeviceUID != show.routing.timecodeDeviceUID) {
             transport.configure(routing: show.routing)
             recheck()
         } else {

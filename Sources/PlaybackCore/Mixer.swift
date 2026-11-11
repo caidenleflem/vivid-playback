@@ -18,16 +18,39 @@ public struct OutputMap: Equatable, Sendable {
     /// Maps the show's routing onto an interface with `channelCount` outputs. A channel the
     /// interface doesn't have is left out (never moved somewhere else).
     public init(routing: OutputRouting, channelCount: Int) {
-        func zeroBased(_ c: Int?) -> Int? {
-            guard let c, c >= 1, c <= channelCount else { return nil }
-            return c - 1
+        self.init(routing: routing, slots: [OutputSlot(uid: routing.deviceUID ?? "", outputs: channelCount)])
+    }
+
+    /// Maps the show's routing onto one or more interfaces played as one: their outputs follow
+    /// each other in order (the first interface's, then the second's). The master is on the first
+    /// interface; timecode on the one the routing names. A channel an interface doesn't have,
+    /// or timecode on an interface that isn't there, is left out: never moved somewhere else.
+    public init(routing: OutputRouting, slots: [OutputSlot]) {
+        let total = slots.reduce(0) { $0 + max(0, $1.outputs) }
+        func channel(_ c: Int?, in slot: Int?) -> Int? {
+            guard let c, let slot, slot < slots.count, c >= 1, c <= slots[slot].outputs else { return nil }
+            return slots[..<slot].reduce(0) { $0 + max(0, $1.outputs) } + c - 1
         }
-        self.channelCount = channelCount
-        masterLeft = zeroBased(routing.masterChannels.first)
-        masterRight = routing.masterChannels.count > 1 ? zeroBased(routing.masterChannels[1]) : nil
-        timecode = zeroBased(routing.timecodeChannel)
+        let timecodeSlot: Int? = routing.splitsInterfaces
+            ? slots.indices.dropFirst().first { slots[$0].uid == routing.timecodeDeviceUID }
+                ?? (slots.first?.uid == routing.timecodeDeviceUID ? 0 : nil)
+            : 0
+        channelCount = total
+        masterLeft = channel(routing.masterChannels.first, in: 0)
+        masterRight = routing.masterChannels.count > 1 ? channel(routing.masterChannels[1], in: 0) : nil
+        timecode = channel(routing.timecodeChannel, in: timecodeSlot)
         // Timecode never shares a channel with the master.
         if let t = timecode, t == masterLeft || t == masterRight { timecode = nil }
+    }
+}
+
+/// One interface in the output, and how many outputs it has.
+public struct OutputSlot: Equatable, Sendable {
+    public var uid: String
+    public var outputs: Int
+    public init(uid: String, outputs: Int) {
+        self.uid = uid
+        self.outputs = outputs
     }
 }
 
