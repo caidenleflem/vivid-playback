@@ -204,6 +204,14 @@ public enum Mixer {
             head.fadeLeft -= n
         }
         if head.fadeLeft <= 0 { head.tail = nil }
+        // A master turned up past 0 dB goes through the limiter so it can't clip.
+        if masterGain > 1 {
+            let left = map.masterLeft.flatMap { $0 < outputs.count ? outputs[$0] : nil }
+            var right = map.masterRight.flatMap { $0 < outputs.count ? outputs[$0] : nil }
+            if right == left { right = nil }
+            if let left { limit(left, frames: frames) }
+            if let right { limit(right, frames: frames) }
+        }
     }
 
     /// Adds `frames` frames of `buffers` from `position` into the outputs starting at output frame

@@ -61,6 +61,8 @@ final class RenderState: @unchecked Sendable {
     /// The position after the last block, and when that block was rendered.
     var renderedPosition = 0
     var renderedAt: Double = 0
+    /// Counts audio blocks rendered (the meters only move when there's new audio).
+    private(set) var blocks = 0
     /// Counts each time the audio thread ran on into the armed song, and which arm that was.
     private(set) var advances = 0
     private(set) var advancedSerial = 0
@@ -166,6 +168,7 @@ final class RenderState: @unchecked Sendable {
             for p in outputs { p?.update(repeating: 0, count: frames) }
         }
         Mixer.peaks(outputs, frames: frames, into: peaks, count: min(64, outputs.count))
+        blocks &+= 1
         renderedPosition = head.position
         renderedAt = CACurrentMediaTime()
     }

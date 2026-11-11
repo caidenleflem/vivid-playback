@@ -156,9 +156,13 @@ struct OutputSheet: View {
                 }
                 FormRow(label: "Master level") {
                     Slider(value: Binding(get: { routing.masterGainDB }, set: { v in model.updateRouting { $0.masterGainDB = v.rounded() } }),
-                           in: -40...0)
+                           in: -40...12)
                         .frame(width: 260)
-                    Text("\(Int(routing.masterGainDB)) dB").font(.manrope(13).monospacedDigit()).foregroundStyle(Brand.ink).frame(width: 50, alignment: .trailing)
+                    Text("\(routing.masterGainDB > 0 ? "+" : "")\(Int(routing.masterGainDB)) dB").font(.manrope(13).monospacedDigit()).foregroundStyle(Brand.ink).frame(width: 50, alignment: .trailing)
+                }
+                if routing.masterGainDB > 0 {
+                    Text("Above 0 dB a limiter on the master keeps it from clipping. Timecode is never touched.")
+                        .font(.manrope(11.5)).foregroundStyle(Brand.space)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     ChannelMeter(label: "Master", channel: transport.masterOutput)

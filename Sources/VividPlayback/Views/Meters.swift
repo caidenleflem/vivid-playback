@@ -1,44 +1,49 @@
 import SwiftUI
 import PlaybackCore
 
-/// Reads the audio thread's peak levels 30 times a second, with smooth fall-off and a held peak.
+/// Reads the audio thread's peak levels 60 times a second. Up at once, down at a steady rate,
+/// with a held peak; between audio blocks (a joined or Dante device can deliver audio in big,
+/// uneven blocks) the meters hold still instead of dipping.
 @MainActor
 final class MeterModel: ObservableObject {
     @Published private(set) var levels = [Float](repeating: 0, count: 64)
     @Published private(set) var holds = [Float](repeating: 0, count: 64)
-    private var holdTimes = [Double](repeating: 0, count: 64)
+    private var meters = [MeterBallistics](repeating: MeterBallistics(), count: 64)
+    private var lastBlocks = 0
     private var timer: Timer?
     private let state: RenderState
 
     init(state: RenderState) {
         self.state = state
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.read() }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     private func read() {
         let now = Date().timeIntervalSinceReferenceDate
+        let blocks = state.blocks
+        let fresh = blocks != lastBlocks
+        lastBlocks = blocks
         var l = levels, h = holds
-        var changed = false
         for c in 0..<64 {
-            let raw = state.peaks[c]
-            state.peaks[c] = 0
-            let v = Self.position(raw)
-            let fallen = max(v, l[c] - 0.04)
-            if fallen != l[c] { l[c] = fallen; changed = true }
-            if v >= h[c] { h[c] = v; holdTimes[c] = now; changed = true }
-            else if now - holdTimes[c] > 1.5, h[c] > 0 { h[c] = max(0, h[c] - 0.03); changed = true }
+            var raw: Float = 0
+            if fresh {
+                raw = state.peaks[c]
+                state.peaks[c] = 0
+            }
+            meters[c].update(peak: raw, fresh: fresh, now: now)
+            l[c] = meters[c].level
+            h[c] = meters[c].hold
         }
-        if changed { levels = l; holds = h }
+        if l != levels { levels = l }
+        if h != holds { holds = h }
     }
 
     /// 0…1 on a -60…0 dB scale.
-    static func position(_ peak: Float) -> Float {
-        guard peak > 0.000_001 else { return 0 }
-        let db = 20 * log10(peak)
-        return max(0, min(1, (db + 60) / 60))
-    }
+    static func position(_ peak: Float) -> Float { MeterBallistics.position(peak) }
 }
 
 /// A slim horizontal level meter: green, then gold above -12 dB, red above -3 dB, with a peak tick.

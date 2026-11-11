@@ -501,3 +501,13 @@ master and for LTC.
   engine's), which may also be why his own aggregate stayed silent.
 - When a timecode output is chosen but the running audio can't reach it, the LTC card and the
   Audio output sheet now say so, instead of "Choose a timecode output".
+
+## 2026-11-11: steadier meters, louder master
+
+- Meters flickered on the joined MacBook + Scarlett device: it delivers audio in bigger, uneven
+  blocks, so some meter reads saw no new audio and dipped, then jumped back. Meters now read 60
+  times a second, hold still between audio blocks, rise at once, fall at 24 dB a second and hold
+  the peak for 1.5 s (core `MeterBallistics`, tested).
+- Master level goes to +12 dB (was 0). Above 0 dB a limiter on the master bends anything over
+  -1 dBFS smoothly so it never clips; at 0 dB or below it isn't in the path. Timecode is never
+  touched (core `Mixer.limit`, tested). 138 tests pass.
