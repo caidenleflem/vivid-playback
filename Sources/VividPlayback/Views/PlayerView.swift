@@ -10,9 +10,11 @@ struct PlayerView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let wide = geo.size.width >= 1080
-            let stage = wide ? geo.size.width - 380 : geo.size.width
-            let art = max(200, min(geo.size.height * 0.46, stage * 0.42, 460))
+            // Up Next sits beside the player when there's room; the artwork takes what's left
+            // after the controls, so nothing is ever cut off at the bottom.
+            let wide = geo.size.width >= 940
+            let stage = wide ? geo.size.width - 330 : geo.size.width
+            let art = max(150, min(geo.size.height - 470, stage * 0.5, 460))
             VStack(spacing: 0) {
                 topBar
                     .padding(.horizontal, 18)
@@ -27,7 +29,7 @@ struct PlayerView: View {
                     }
                     if wide {
                         UpNextPanel()
-                            .frame(width: 340)
+                            .frame(width: 300)
                             .padding(.trailing, 22)
                             .padding(.vertical, 18)
                     }
@@ -75,7 +77,7 @@ struct PlayerView: View {
                 .animation(.vivid(0.5), value: transport.isPlaying)
                 .id(song.id)
                 .transition(.opacity)
-            Spacer(minLength: 28).frame(maxHeight: 40)
+            Spacer(minLength: 20).frame(maxHeight: 36)
 
             VStack(spacing: 6) {
                 Text(song.title)
