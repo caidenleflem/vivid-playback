@@ -122,9 +122,16 @@ public struct DeskSequenceEvent: Equatable, Sendable {
     public var previousIndex: Int?
     public var wasOn: Bool
     public var name: String?
+    /// When the plugin saw the change, on the desk's own clock (seconds). Nil from an older
+    /// plugin, or a desk whose clock it can't read.
+    public var deskTime: Double?
+
+    /// The plugin looks every 10 ms, so a change happened, on average, half that before its stamp.
+    public static let detectionLag = 0.005
 
     public init(page: Int, executor: Int, isOn: Bool, cue: Double?, index: Int?, previousIndex: Int?,
-                wasOn: Bool, name: String? = nil) {
+                wasOn: Bool, name: String? = nil, deskTime: Double? = nil) {
+        self.deskTime = deskTime
         self.page = page
         self.executor = executor
         self.isOn = isOn
@@ -142,10 +149,11 @@ public struct DeskSequenceEvent: Equatable, Sendable {
         func on(_ s: String) -> Bool { ["on", "1", "true"].contains(s.lowercased()) }
         func index(_ s: String) -> Int? { Int(s).flatMap { $0 >= 0 ? $0 : nil } }
         let name = a.count > 6 ? a[6] : ""
+        let stamp = a.count > 7 ? Double(a[7]).flatMap { $0 >= 0 ? $0 : nil } : nil
         return DeskSequenceEvent(page: page, executor: ref.executor, isOn: on(a[1]),
                                  cue: Double(a[2].replacingOccurrences(of: ",", with: ".")),
                                  index: index(a[3]), previousIndex: index(a[4]), wasOn: on(a[5]),
-                                 name: name.isEmpty || name == "-" ? nil : name)
+                                 name: name.isEmpty || name == "-" ? nil : name, deskTime: stamp)
     }
 
     /// What to record, so playing it back puts the sequence where the desk put it: the next cue
@@ -219,5 +227,36 @@ public struct DeskLabel: Equatable, Sendable {
             }
         }
         return (lanes, touched)
+    }
+}
+
+/// Puts the desk's own timestamps on this Mac's clock, so a hit records where it happened, not
+/// when it got here: the network, the desk's command queue and a busy screen all add delay, and
+/// a burst of hits gets spread out. The fastest message in the last little while shows the true
+/// offset between the two clocks (the others were held up somewhere); it's kept fresh so the two
+/// clocks slowly drifting apart doesn't matter.
+public struct DeskClock: Sendable {
+    /// How far back the fastest message is looked for.
+    public var window: Double = 20
+    private var samples: [(at: Double, offset: Double)] = []
+    private var wholeSeconds = 0
+    private var fractional = false
+
+    public init() {}
+
+    /// This Mac's time (the arrival clock) for something the desk stamped `deskTime`, given it
+    /// arrived at `arrival`. Without a usable stamp: the arrival time.
+    public mutating func time(desk deskTime: Double?, arrivedAt arrival: Double) -> Double {
+        guard let deskTime else { return arrival }
+        // A desk clock in whole seconds is no use for timing: fall back to arrival.
+        if deskTime == deskTime.rounded(.down) { wholeSeconds += 1 } else { fractional = true }
+        if !fractional && wholeSeconds >= 3 { return arrival }
+        let offset = arrival - deskTime
+        // The plugin restarted or the desk's clock jumped: start again.
+        if let best = samples.map(\.offset).min(), abs(offset - best) > 5 { samples.removeAll() }
+        samples.append((arrival, offset))
+        samples.removeAll { $0.at < arrival - window }
+        let best = samples.map(\.offset).min() ?? offset
+        return min(arrival, deskTime + best)
     }
 }

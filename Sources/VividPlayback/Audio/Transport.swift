@@ -500,7 +500,8 @@ final class Transport: ObservableObject {
         var frames = Double(s.renderedPosition)
         if s.playing {
             // Between audio blocks, count on in real time; then allow for the interface's latency.
-            frames += min(0.1, max(0, time - s.renderedAt)) * audio.sampleRate
+            // A time a little in the past (a desk hit that arrived a moment ago) counts back.
+            frames += min(0.1, max(-2, time - s.renderedAt)) * audio.sampleRate
             frames -= audio.latency * audio.sampleRate
         }
         var seconds = frames / audio.sampleRate - song.fileOffset

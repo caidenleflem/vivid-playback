@@ -222,8 +222,8 @@ final class AppModel: ObservableObject {
         }
         control.followRate = { [weak self] in self?.show?.defaultRate ?? .fps30 }
         control.onTriggerSettingsChange = { [weak self] in self?.syncTriggers() }
-        control.onDeskGo = { [weak self] go in self?.deskGo(go) }
-        control.onDeskSequence = { [weak self] event in self?.deskSequence(event) }
+        control.onDeskGo = { [weak self] go, at in self?.deskGo(go, arrivedAt: at) }
+        control.onDeskSequence = { [weak self] event, at in self?.deskSequence(event, arrivedAt: at) }
         control.onDeskLabel = { [weak self] label in self?.deskLabel(label) }
         // Whatever's still waiting to be saved is written before the app quits.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
@@ -1010,31 +1010,71 @@ final class AppModel: ObservableObject {
     /// A sequence on the desk changed cue (the Vivid Recorder plugin, which only watches the
     /// fader page the desk is on). Recorded onto the selected song, on that executor's lane, as
     /// what the sequence did: Go+, Go-, Top, Goto a cue, On or Off.
-    func deskSequence(_ e: DeskSequenceEvent) {
+    func deskSequence(_ e: DeskSequenceEvent, arrivedAt: Double = CACurrentMediaTime()) {
         let from = "\(e.page).\(e.executor) \(e.action.label)\(e.isOn && e.cue != nil ? " cue \(TriggerLane.cueText(e.cue!))" : "")"
         guard recordingFromDesk else { lastDeskGo = ("\(from) · not recording", Date()); return }
         guard !locked, currentSong != nil else { lastDeskGo = ("\(from) · nothing selected", Date()); return }
         guard transport.isPlaying else { lastDeskGo = ("\(from) · play the song to record it", Date()); return }
-        let seconds = transport.position()
-        var lane = DeskRecorder.lane(for: e, in: lanes)
-        if lane == nil {
-            let made = TriggerLane(page: e.page, executor: e.executor, color: lanes.count % 6, key: TriggerLane.freeKey(in: lanes))
-            saveLane(made)
-            lane = made
+        // Where it happened: the desk's own stamp put on this Mac's clock (or the moment it
+        // arrived), then where the music was at that moment.
+        var when = deskClock.time(desk: e.deskTime, arrivedAt: arrivedAt)
+        if e.deskTime != nil { when -= DeskSequenceEvent.detectionLag }
+        deskQueue.append((e, transport.position(at: when)))
+        guard !deskFlushQueued else { return }
+        deskFlushQueued = true
+        // Everything that arrives in the same moment lands in one edit: one redraw, one undo.
+        DispatchQueue.main.async { [weak self] in self?.flushDeskQueue() }
+    }
+
+    private var deskClock = DeskClock()
+    private var deskQueue: [(event: DeskSequenceEvent, seconds: Double)] = []
+    private var deskFlushQueued = false
+
+    private func flushDeskQueue() {
+        deskFlushQueued = false
+        let items = deskQueue
+        deskQueue = []
+        guard !items.isEmpty, !locked, let song = currentSong else { return }
+        rememberMarkers(of: song)
+        // A hit right on a trigger that was already there is the desk echoing what Vivid just
+        // fired, not a new one.
+        let before = song.markers
+        var flashes: [(marker: UUID, lane: UUID)] = []
+        var last = ""
+        var skipped = 0
+        edit { show in
+            guard let si = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+            var lanes = show.songs[si].triggerLanes ?? []
+            for (e, seconds) in items {
+                let found = lanes.firstIndex { $0.page == e.page && $0.executor == e.executor }
+                if found == nil {
+                    lanes.append(TriggerLane(page: e.page, executor: e.executor, color: lanes.count % 6,
+                                             key: TriggerLane.freeKey(in: lanes)))
+                }
+                let lane = lanes[found ?? lanes.count - 1]
+                let tc = timecode(for: song, at: max(0, seconds))
+                let frame = tc.frames(since: song.start)
+                let existing = before.filter { $0.laneID == lane.id }.map { $0.time.frames(since: song.start) }
+                if DeskRecorder.isDuplicate(frame: frame, existing: existing) { skipped += 1; continue }
+                let action = e.action
+                let m = Marker(time: tc, label: e.label, laneID: lane.id,
+                               value: action == .gotoCue ? e.cue : nil, action: action == lane.action ? nil : action)
+                show.songs[si].markers.append(m)
+                flashes.append((m.id, lane.id))
+                last = "\(e.page).\(e.executor) \(action.label) → \(lane.title) at \(tc)"
+            }
+            show.songs[si].triggerLanes = lanes.isEmpty ? nil : lanes
+            show.songs[si].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
         }
-        guard let lane, let fresh = currentSong else { return }
-        let frame = timecode(for: fresh, at: max(0, seconds)).frames(since: fresh.start)
-        let existing = fresh.markers.filter { $0.laneID == lane.id }.map { $0.time.frames(since: fresh.start) }
-        if DeskRecorder.isDuplicate(frame: frame, existing: existing) {
-            lastDeskGo = ("\(from) · already on \(lane.title) here", Date())
-            return
+        for f in flashes { control.flash(f.marker, lane: f.lane) }
+        let n = flashes.count
+        if n > 1 {
+            lastDeskGo = ("\(n) hits at once · \(last)\(skipped > 0 ? " · \(skipped) already there" : "")", Date())
+        } else if n == 1 {
+            lastDeskGo = (last, Date())
+        } else if skipped > 0 {
+            lastDeskGo = ("already on the lane here", Date())
         }
-        let action = e.action
-        guard let marker = insertTrigger(on: lane, at: seconds, label: e.label,
-                                         action: action == lane.action ? nil : action,
-                                         value: action == .gotoCue ? e.cue : nil) else { return }
-        control.flash(marker.id, lane: lane.id)
-        lastDeskGo = ("\(from) → \(lane.title) at \(marker.time)", Date())
     }
 
     /// Names arriving from the desk's Vivid Labels plugin, gathered so one notice (with one Undo)
@@ -1126,13 +1166,13 @@ final class AppModel: ObservableObject {
         post("Copied \(deskCommand(for: song)). Put it in the song's macro on the desk (OSC in must be on here).")
     }
 
-    func deskGo(_ go: DeskGo) {
+    func deskGo(_ go: DeskGo, arrivedAt: Double = CACurrentMediaTime()) {
         let from = "\(go.source.rawValue) GO \(go.label)\(go.cue.map { " cue \($0)" } ?? "")"
         guard recordingFromDesk else { lastDeskGo = ("\(from) · not recording", Date()); return }
         guard !locked, currentSong != nil else { lastDeskGo = ("\(from) · nothing cued", Date()); return }
         guard transport.isPlaying else { lastDeskGo = ("\(from) · play the song to record it", Date()); return }
-        // Where the music was when the GO arrived (the position you hear).
-        let seconds = transport.position()
+        // Where the music was when the GO arrived (the position you hear), not when the screen got to it.
+        let seconds = transport.position(at: arrivedAt)
         var lane = DeskRecorder.lane(for: go, in: lanes)
         if lane == nil {
             // An executor with no lane yet gets one.

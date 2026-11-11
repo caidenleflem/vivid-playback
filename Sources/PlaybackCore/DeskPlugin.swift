@@ -123,7 +123,7 @@ public enum DeskPlugin {
     -- (its address and the port Vivid listens on, with Send on).
 
     local OSC_LINE = __OSC_LINE__
-    local LOOK_EVERY = 0.02   -- seconds between looks at the executors
+    local LOOK_EVERY = 0.01   -- seconds between looks at the executors
 
     local function prop(h, key)
       if h == nil then return nil end
@@ -209,10 +209,18 @@ public enum DeskPlugin {
       return out
     end
 
-    local function send(key, now, before)
-      Cmd(string.format('SendOSC %d "/vivid/seq,sssssss,%s,%s,%s,%d,%d,%s,%s"',
+    -- The desk's clock, so Vivid can put each change where it happened even when a burst of
+    -- them takes a while to send. -1 when it can't be read.
+    local function deskTime()
+      local ok, t = pcall(function() return Time() end)
+      if ok and type(t) == "number" then return t end
+      return -1
+    end
+
+    local function send(key, now, before, stamp)
+      Cmd(string.format('SendOSC %d "/vivid/seq,ssssssss,%s,%s,%s,%d,%d,%s,%s,%.4f"',
         OSC_LINE, key, now.on and "on" or "off", cueText(now.number), now.index,
-        before.index, before.on and "on" or "off", clean(now.name)))
+        before.index, before.on and "on" or "off", clean(now.name), stamp))
     end
 
     local function test()
@@ -221,7 +229,7 @@ public enum DeskPlugin {
         local on, number, index, name = where(e.seq)
         Printf("  %s  %s  cue %s (place %d)  %s", e.key, on and "on" or "off", cueText(number), index, tostring(name or ""))
       end
-      Printf("It would send them on OSC line %d.", OSC_LINE)
+      Printf("It would send them on OSC line %d. Desk clock reads %s.", OSC_LINE, tostring(deskTime()))
     end
 
     local function Main(display, argument)
@@ -235,6 +243,8 @@ public enum DeskPlugin {
       Printf("Vivid Recorder is sending to Vivid Playback on OSC line %d. Run it again to stop.", OSC_LINE)
       local last = {}
       while _G.VividRecorderRunning do
+        -- One stamp per look: everything that changed since the last look happened just now.
+        local stamp = deskTime()
         for _, e in ipairs(onThisPage()) do
           local on, number, index, name = where(e.seq)
           local now = { on = on, number = number, index = index, name = name }
@@ -245,7 +255,7 @@ public enum DeskPlugin {
           end
           -- The first look at an executor (or a page) only learns where it is.
           if before ~= nil and (before.on ~= now.on or before.number ~= now.number) then
-            send(e.key, now, before)
+            send(e.key, now, before, stamp)
           end
           last[e.key] = now
         end

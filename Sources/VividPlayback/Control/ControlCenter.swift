@@ -186,9 +186,11 @@ final class ControlCenter: ObservableObject {
     /// Set by the app model.
     var onCommand: ((RemoteCommand) -> Void)?
     /// A GO from the desk (OSC /vivid/exec or MIDI Show Control), for Record from the desk.
-    var onDeskGo: ((DeskGo) -> Void)?
-    /// A sequence on the desk changed cue, from the Vivid Recorder plugin.
-    var onDeskSequence: ((DeskSequenceEvent) -> Void)?
+    /// With the moment it arrived (CACurrentMediaTime), taken on the network thread, so how busy
+    /// the screen is doesn't move it.
+    var onDeskGo: ((DeskGo, Double) -> Void)?
+    /// A sequence on the desk changed cue, from the Vivid Recorder plugin, and when it arrived.
+    var onDeskSequence: ((DeskSequenceEvent, Double) -> Void)?
     /// A sequence's name from the desk, from the Vivid Labels plugin.
     var onDeskLabel: ((DeskLabel) -> Void)?
     private var mscIn: UDPSocket?
@@ -291,6 +293,7 @@ final class ControlCenter: ObservableObject {
             return
         }
         socket.listen(on: netQueue) { [weak self] data, from in
+            let arrived = CACurrentMediaTime()
             let messages = OSCMessage.parse(data)
             Task { @MainActor in
                 guard let self else { return }
@@ -304,12 +307,12 @@ final class ControlCenter: ObservableObject {
                     }
                     if let event = DeskSequenceEvent.from(m) {
                         self.heard(text, from: from, meaning: "desk: \(event.page).\(event.executor) \(event.action.label)")
-                        self.onDeskSequence?(event)
+                        self.onDeskSequence?(event, arrived)
                         continue
                     }
                     if let go = DeskGo.from(m) {
                         self.heard(text, from: from, meaning: "desk GO \(go.label)")
-                        self.onDeskGo?(go)
+                        self.onDeskGo?(go, arrived)
                         continue
                     }
                     guard let cmd = RemoteCommand.from(m) else {
@@ -346,8 +349,9 @@ final class ControlCenter: ObservableObject {
             return
         }
         socket.listen(on: netQueue) { [weak self] data, _ in
+            let arrived = CACurrentMediaTime()
             guard let go = DeskGo.from(msc: data) else { return }
-            Task { @MainActor in self?.onDeskGo?(go) }
+            Task { @MainActor in self?.onDeskGo?(go, arrived) }
         }
         mscIn = socket
         deskStatus = "Listening on port \(settings.mscPort)" + (settings.mscInPort == nil ? "" : " · \(portLabel(settings.mscInPort))")
@@ -356,7 +360,7 @@ final class ControlCenter: ObservableObject {
     private func midiMessage(_ m: [UInt8]) {
         // A GO in MIDI Show Control (Record from the desk).
         if m.first == 0xF0, let go = DeskGo.from(msc: m) {
-            onDeskGo?(go)
+            onDeskGo?(go, CACurrentMediaTime())
             return
         }
         // MIDI timecode (for following).

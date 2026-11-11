@@ -672,3 +672,22 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   their port alone: another app on it shows "Port 8000 is in use by another app (grandMA3 onPC…)".
   A console target that's this Mac on the OSC-in port gets a warning and a one-click "Listen on
   8001 instead". Art-Net in stays shared.
+
+## 2026-11-11: desk hits land at the right time, even in a burst
+
+- Caiden: lots of OSC at once while recording messed up the timing. Three causes, all fixed:
+  - Hits were timed when the main thread got to them, not when they arrived. They're now timed
+    the moment they arrive, on the network thread (OSC, MIDI Show Control over the network), and
+    the playhead is counted back to that moment (`Transport.position(at:)` now goes up to 2 s
+    into the past).
+  - Each hit was its own edit and its own redraw. A burst now lands in one edit, one redraw and
+    one ⌘Z.
+  - The desk sends one command per change, so later hits in a burst left later. The Vivid
+    Recorder plugin now stamps every change with the desk's clock (`Time()`), looks every 10 ms
+    (was 20), and Vivid puts the stamps on its own clock (core `DeskClock`: the fastest recent
+    message shows the true offset; drift and a restarted plugin are followed; no stamp or a
+    whole-second clock falls back to arrival time). Tested with 20 hits arriving over 400 ms:
+    all land on the instant they happened. 171 tests pass.
+- **Re-save the plugins** (Save grandMA3 Plugins…) to get the stamped recorder; the old one still
+  works, timed on arrival. **Needs a check on the desk:** `Plugin "Vivid Recorder" "test"` prints
+  the desk clock; it should read with decimals.

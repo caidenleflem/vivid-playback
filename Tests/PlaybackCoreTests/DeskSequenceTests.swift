@@ -68,6 +68,7 @@ final class DeskSequenceTests: XCTestCase {
         let files = DeskPlugin.files(oscLine: 2)
         XCTAssertEqual(files.map(\.name), ["VividRecorder.xml", "VividRecorder.lua"])
         XCTAssertTrue(files[1].contents.contains("local OSC_LINE = 2"))
+        XCTAssertTrue(files[1].contents.contains("/vivid/seq,ssssssss,"), "eight arguments: the stamp is last")
         XCTAssertTrue(files[0].contents.contains(#"FileName="VividRecorder.lua""#))
     }
 }
@@ -98,5 +99,51 @@ final class DeskLabelTests: XCTestCase {
         let names = DeskPlugin.allFiles().map(\.name)
         XCTAssertEqual(names, ["VividRecorder.xml", "VividRecorder.lua", "VividLabels.xml", "VividLabels.lua"])
         XCTAssertTrue(DeskPlugin.Labels.lua(oscLine: 3).contains("local OSC_LINE = 3"))
+    }
+}
+
+final class DeskClockTests: XCTestCase {
+    func testABurstHeldUpOnTheWayStillLandsWhereItHappened() {
+        var clock = DeskClock()
+        // The desk's clock is 1000 s behind this Mac's; messages take 3 ms at best.
+        let offset = 1000.0, best = 0.003
+        // A quiet message first, then 20 hits at the same instant that arrive spread over 400 ms.
+        _ = clock.time(desk: 5.137, arrivedAt: 5.137 + offset + best)
+        for i in 0..<20 {
+            let at = clock.time(desk: 6.4219, arrivedAt: 6.4219 + offset + best + Double(i) * 0.02)
+            XCTAssertEqual(at, 6.4219 + offset + best, accuracy: 1e-9, "hit \(i)")
+        }
+    }
+
+    func testTheFastestMessageSetsTheOffset() {
+        var clock = DeskClock()
+        let delays = [0.040, 0.012, 0.090, 0.004, 0.030]
+        var last = 0.0
+        for (i, d) in delays.enumerated() { last = clock.time(desk: Double(i) + 0.5, arrivedAt: Double(i) + 0.5 + 100 + d) }
+        XCTAssertEqual(last, 4.5 + 100 + 0.004, accuracy: 1e-9)
+    }
+
+    func testDriftIsFollowedAndARestartIsNoticed() {
+        var clock = DeskClock()
+        _ = clock.time(desk: 1.5, arrivedAt: 101.5)
+        // 30 s later the clocks have drifted 5 ms apart: the old sample has aged out.
+        XCTAssertEqual(clock.time(desk: 31.5, arrivedAt: 131.505), 131.505, accuracy: 1e-9)
+        // The plugin restarted with a new clock.
+        XCTAssertEqual(clock.time(desk: 0.25, arrivedAt: 140.0), 140.0, accuracy: 1e-9)
+        XCTAssertEqual(clock.time(desk: 0.75, arrivedAt: 140.6), 140.5, accuracy: 1e-9)
+    }
+
+    func testNoStampOrWholeSecondsUseArrival() {
+        var clock = DeskClock()
+        XCTAssertEqual(clock.time(desk: nil, arrivedAt: 7), 7)
+        for i in 0..<5 { _ = clock.time(desk: Double(i), arrivedAt: 50 + Double(i) + 0.3) }
+        XCTAssertEqual(clock.time(desk: 9, arrivedAt: 70.4), 70.4, "a whole-second clock can't time hits")
+    }
+
+    func testTheStampIsRead() throws {
+        let e = try XCTUnwrap(DeskSequenceEvent.from(OSCMessage("/vivid/seq", ["3.201", "on", "2", "1", "0", "on", "Look", "1234.5678"].map { .string($0) })))
+        XCTAssertEqual(e.deskTime, 1234.5678)
+        let old = try XCTUnwrap(DeskSequenceEvent.from(OSCMessage("/vivid/seq", ["3.201", "on", "2", "1", "0", "on", "Look"].map { .string($0) })))
+        XCTAssertNil(old.deskTime, "an older plugin still works")
     }
 }
