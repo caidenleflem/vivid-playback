@@ -7,33 +7,43 @@ import PlaybackCore
 struct PlayerView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
+    /// Up Next starts folded to the next song, floating in the corner, with the player centred
+    /// in the window. Unfolded, it takes a column and the player moves over to make room.
+    @State private var upNextExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
-            // Up Next sits beside the player when there's room; the artwork takes what's left
-            // after the controls, so nothing is ever cut off at the bottom.
+            // The artwork takes what's left after the controls, so nothing is cut off at the bottom.
             let wide = geo.size.width >= 940
-            let stage = wide ? geo.size.width - 330 : geo.size.width
+            let column = wide && upNextExpanded
+            let stage = column ? geo.size.width - 330 : geo.size.width
             let art = max(150, min(geo.size.height - 470, stage * 0.5, 460))
             VStack(spacing: 0) {
                 topBar
                     .padding(.horizontal, 18)
                     .padding(.top, 12)
-                HStack(alignment: .top, spacing: 0) {
-                    if let song = model.currentSong {
-                        nowPlaying(song, art: art)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        Text("Nothing cued").font(.manrope(18, .semibold)).foregroundStyle(Brand.space)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack(alignment: .topTrailing) {
+                    HStack(alignment: .top, spacing: 0) {
+                        Group {
+                            if let song = model.currentSong {
+                                nowPlaying(song, art: art)
+                            } else {
+                                Text("Nothing cued").font(.manrope(18, .semibold)).foregroundStyle(Brand.space)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // Room for the unfolded queue; folded, the player has the whole width.
+                        if column { Color.clear.frame(width: 322) }
                     }
                     if wide {
-                        UpNextPanel()
+                        UpNextPanel(expanded: $upNextExpanded)
                             .frame(width: 300)
                             .padding(.trailing, 22)
                             .padding(.vertical, 18)
                     }
                 }
+                .animation(reduceMotion ? .easeInOut(duration: 0.15) : .vivid(0.4), value: upNextExpanded)
             }
         }
     }
@@ -257,8 +267,7 @@ private struct ExtrasRow: View {
 /// collapsed to just the next song; the chevron shows the rest of the set.
 private struct UpNextPanel: View {
     @EnvironmentObject private var model: AppModel
-    @State private var expanded = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var expanded: Bool
 
     var body: some View {
         let q = model.queue
@@ -267,7 +276,7 @@ private struct UpNextPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 guard upcoming.count > 1 || expanded else { return }
-                withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .vivid(0.35)) { expanded.toggle() }
+                expanded.toggle()
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(expanded ? "Up Next" : "Next").font(.manrope(17, .bold)).foregroundStyle(Brand.ink)

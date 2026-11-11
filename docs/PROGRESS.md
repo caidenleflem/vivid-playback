@@ -396,3 +396,6 @@ Dante interface, which macOS sees as an ordinary audio device. To make that smoo
 - Up Next starts collapsed to just the next song ("Next · +n more"), as a card that hugs its
   content; click the header or chevron to show the rest of the set (full-height list), and again
   to collapse. Opens collapsed each time.
+- With Up Next folded, the player is centred in the whole window and the Next card floats in the
+  corner; unfolding gives the queue a column and the player glides over (0.4 s, crossfade under
+  Reduce Motion).
