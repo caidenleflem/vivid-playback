@@ -944,7 +944,9 @@ final class AppModel: ObservableObject {
     }
 
     func move(_ marker: Marker, in song: Song, to seconds: Double) {
-        let tc = timecode(for: song, at: max(0, min(seconds, playLength(of: song))))
+        var target = seconds
+        if snapToGrid, let grid = song.beatGrid { target = grid.snap(seconds, to: snapDivision) }
+        let tc = timecode(for: song, at: max(0, min(target, playLength(of: song))))
         updateMarker(marker, in: song) { $0.time = tc }
     }
 
@@ -1187,9 +1189,148 @@ final class AppModel: ObservableObject {
     func nudgeSelected(frames: Int) { shiftSelected(frames: frames) }
 
     /// Drags of a selected marker move the whole selection.
-    func moveSelected(by seconds: Double) {
+    func moveSelected(by seconds: Double, dragging marker: Marker? = nil) {
         guard let song = currentSong else { return }
-        shiftSelected(frames: Int((seconds * song.rate.framesPerSecond).rounded()))
+        let fps = song.rate.framesPerSecond
+        var frames = Int((seconds * fps).rounded())
+        if snapToGrid, let grid = song.beatGrid, let marker {
+            let from = marker.time.frames(since: song.start)
+            frames = grid.snapFrame(from + frames, fps: fps, to: snapDivision) - from
+        }
+        shiftSelected(frames: frames)
+    }
+
+    // MARK: Beat grid
+
+    /// The song whose beat is being found right now.
+    @Published private(set) var findingBeat: UUID?
+    /// Markers dragged in the timeline land on the grid.
+    @Published var snapToGrid = UserDefaults.standard.bool(forKey: "snapToGrid") {
+        didSet { UserDefaults.standard.set(snapToGrid, forKey: "snapToGrid") }
+    }
+    @Published var snapDivision = BeatGrid.Division(rawValue: UserDefaults.standard.string(forKey: "snapDivision") ?? "") ?? .beat {
+        didSet { UserDefaults.standard.set(snapDivision.rawValue, forKey: "snapDivision") }
+    }
+
+    /// Finds the tempo and the bars in the song's master, in the background. Nothing on the
+    /// timeline moves: the grid is drawn, and says how well it fits.
+    func findBeat(for song: Song) {
+        guard !locked, findingBeat == nil else { return }
+        guard let url = show?.url(forMediaPath: song.masterPath) else {
+            post("\(song.title) needs a master to find the beat in. Or type the tempo in.")
+            return
+        }
+        findingBeat = song.id
+        let reader = self.reader, offset = song.fileOffset
+        Task {
+            let grid = await Task.detached(priority: .utility) { () -> BeatGrid? in
+                guard let read = try? reader.readChannels(of: url), let first = read.channels.first, !first.isEmpty else { return nil }
+                var mono = [Float](repeating: 0, count: first.count)
+                for ch in read.channels {
+                    for i in 0..<min(mono.count, ch.count) { mono[i] += ch[i] }
+                }
+                let k = 1 / Float(read.channels.count)
+                for i in mono.indices { mono[i] *= k }
+                return BeatDetector.detect(mono, sampleRate: read.sampleRate, fileOffset: offset)
+            }.value
+            self.findingBeat = nil
+            guard let grid else {
+                self.post("No steady beat found in \(song.title)'s master. Type the tempo in instead.")
+                return
+            }
+            let before = self.show?.song(id: song.id)?.beatGrid
+            self.setGrid(grid, for: song.id)
+            self.postUndo(Self.describe(grid, title: song.title)) { [weak self] in self?.setGrid(before, for: song.id) }
+        }
+    }
+
+    /// "Night Drive: 128 BPM, bar 1 on the song's start. Fits the whole song."
+    static func describe(_ g: BeatGrid, title: String) -> String {
+        var text = "\(title): \(g.tempoText)"
+        let bar = (g.downbeat / g.barLength).rounded() * g.barLength
+        text += abs(g.downbeat - bar) < 0.06 ? ", bar 1 on the song's start." : ", bar 1 from the kick."
+        if let at = g.driftsAt {
+            text += " Fits up to \(Self.clock(at)), then the music moves off it."
+        } else if let fit = g.fit, fit < 0.8 {
+            text += " Only fits about \(Int(fit * 100))% of the song: check it by ear."
+        } else {
+            text += " Fits the whole song."
+        }
+        if g.bpm > 160 || g.bpm < 80 { text += " If it feels twice as fast or slow, use ×2 or ÷2." }
+        return text
+    }
+
+    private static func clock(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    func setGrid(_ grid: BeatGrid?, for songID: UUID) {
+        guard !locked else { return }
+        edit { show in
+            guard let i = show.songs.firstIndex(where: { $0.id == songID }) else { return }
+            show.songs[i].beatGrid = grid
+        }
+    }
+
+    /// Changes the current song's grid (tempo, bar 1, beats in a bar).
+    func updateGrid(_ change: (inout BeatGrid) -> Void) {
+        guard let song = currentSong, var grid = song.beatGrid else { return }
+        change(&grid)
+        setGrid(grid, for: song.id)
+    }
+
+    /// Types a tempo in: a new grid with bar 1 at the song's start, or the grid's new tempo.
+    func setTempo(_ bpm: Double) {
+        guard let song = currentSong, BeatGrid.tempoRange.contains(bpm) else { return }
+        if var g = song.beatGrid {
+            g.setTempo(bpm, keeping: g.downbeat)
+            setGrid(g, for: song.id)
+        } else {
+            setGrid(BeatGrid(bpm: bpm), for: song.id)
+        }
+    }
+
+    func barStartsAtPlayhead() { updateGrid { $0.barStarts(at: transport.position()) } }
+
+    func removeGrid() {
+        guard let song = currentSong, let before = song.beatGrid else { return }
+        setGrid(nil, for: song.id)
+        postUndo("Beat grid removed from \(song.title).") { [weak self] in self?.setGrid(before, for: song.id) }
+    }
+
+    /// Moves the selected markers and triggers onto the grid. ⌘Z puts them back.
+    func tightenSelected() {
+        guard let song = currentSong, !locked, !selectedMarkerIDs.isEmpty else { return }
+        guard let grid = song.beatGrid else {
+            post("\(song.title) has no beat grid yet. Find the beat first.")
+            return
+        }
+        let fps = song.rate.framesPerSecond
+        let len = playLength(of: song)
+        let maxFrames: Int? = len > 0 ? Int(len * fps) : nil
+        rememberMarkers(of: song)
+        var moved = 0, most = 0
+        edit { show in
+            guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+            for m in show.songs[i].markers.indices where selectedMarkerIDs.contains(show.songs[i].markers[m].id) {
+                let from = show.songs[i].markers[m].time.frames(since: song.start)
+                var to = grid.snapFrame(from, fps: fps, to: snapDivision)
+                to = max(0, maxFrames.map { min($0, to) } ?? to)
+                if to != from {
+                    moved += 1
+                    most = max(most, abs(to - from))
+                    show.songs[i].markers[m].time = song.start.adding(frames: to)
+                }
+            }
+            show.songs[i].markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
+        }
+        let n = selectedMarkerIDs.count
+        if moved == 0 {
+            post("Everything selected is already on the \(snapDivision.label.lowercased()).")
+        } else {
+            post("Moved \(moved) of \(n) onto the \(snapDivision.label.lowercased()), the furthest by \(most) frame\(most == 1 ? "" : "s").", markerUndo: true)
+        }
     }
 
     private func rememberMarkers(of song: Song) {

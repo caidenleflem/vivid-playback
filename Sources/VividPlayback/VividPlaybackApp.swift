@@ -95,6 +95,10 @@ struct PlaybackCommands: Commands {
             Button("Add Trigger") { model.addTrigger() }
                 .keyboardShortcut("c", modifiers: [])
                 .disabled(typing || model.locked || model.screen != .timeline)
+            Button("Selected Onto the Beat Grid") { model.tightenSelected() }
+                .keyboardShortcut("q", modifiers: [])
+                .disabled(typing || model.locked || model.screen != .timeline || model.selectedMarkerIDs.isEmpty
+                          || model.currentSong?.beatGrid == nil)
             Button("New Trigger Lane…") { model.newLane() }
                 .disabled(model.locked || model.show == nil)
             Button(model.recordingFromDesk ? "Stop Recording from the Desk" : "Record GOs from the Desk") { model.toggleDeskRecording() }

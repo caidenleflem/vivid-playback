@@ -550,3 +550,27 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   are needed (it offers to install them). Later builds only compile what changed.
 - This cloud session can't reach his Mac: the VividPlayback folder is in his Remote Control list
   but isn't offered to cloud sessions.
+
+## 2026-11-11: beat grid
+
+- **Find the beat** (timeline top bar › Beat grid): listens to the song's master in the
+  background and draws bars and beats behind the waveform and lanes, with bar numbers. Nothing on
+  the timeline moves. It says how well it fits: the whole song, up to where the music moves off it
+  (a tempo change, a live section), or only part of it ("check it by ear").
+- Detection (core `BeatDetector`): onsets at 100 Hz from three bands (kick, hats/snare, all),
+  tempo by autocorrelation leaning to 80–160 BPM, related tempos (×2, ÷2, ×1.5, ×⅔) compared,
+  then folded to a hundredth of a BPM so the grid doesn't drift over four minutes. Bar 1 is the
+  song's start when a beat is there (the sheet's start is usually the downbeat), otherwise the
+  beat the kick hits hardest. A steady pad or silence finds nothing. On a 4-minute 48 kHz song it
+  takes about 0.06 s; 92–153 BPM came out exact, beats within 5 ms; very slow or very fast songs
+  can come out at double or half, hence ×2 / ÷2.
+- Fixing it: type a tempo, ÷2 / ×2, Bar 1 starts at the playhead, move bars a beat either way,
+  line up by 5 ms, beats in a bar, remove (⌘Z-style Undo in the notice).
+- **Snap**: with it on, a dragged marker or trigger lands on the grid (bar, beat, ½ or ¼ beat; a
+  dragged selection keeps its spacing). Recording (keys, desk GOs) is never snapped.
+- **Selected onto the grid** (Q, or the selection bar): moves what's selected onto the nearest
+  grid point and says how many moved and by how much; ⌘Z puts them back.
+- Core: `BeatGrid` (bars/beats, snapping to whole frames, fixes), `Song.beatGrid` (older shows
+  load without one). 156 tests pass.
+- **Needs a check on the Mac:** detection on real masters (and how often it's double/half), the
+  lines' look at different zooms.

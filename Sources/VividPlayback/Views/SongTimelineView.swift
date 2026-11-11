@@ -50,6 +50,7 @@ struct SongTimelineView: View {
 
     private func actions(compact: Bool) -> some View {
         HStack(spacing: compact ? 8 : 14) {
+            BeatGridButton(compact: compact)
             Button { model.toggleLoop() } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "repeat").foregroundStyle(transport.loop != nil ? Brand.gold : Brand.ink)
@@ -258,6 +259,10 @@ struct TimelinePanel: View {
                             .frame(width: max(2, x1 - x0), height: linesBottom - 24)
                             .offset(x: labelWidth + 12 + x0, y: 24)
                             .allowsHitTesting(false)
+                    }
+                    if let grid = song.beatGrid {
+                        BeatGridLines(grid: grid, win: win, width: trackWidth, height: linesBottom - 30)
+                            .offset(x: labelWidth + 12, y: 30)
                     }
                     markerLines(width: trackWidth, win: win, height: linesBottom - 30)
                         .offset(x: labelWidth + 12)
@@ -618,7 +623,7 @@ struct TimelinePanel: View {
                 guard !model.locked, width > 0 else { return }
                 let seconds = Double(v.translation.width / width) * win.span
                 if model.selectedMarkerIDs.count > 1 && model.selectedMarkerIDs.contains(m.id) {
-                    model.moveSelected(by: seconds)
+                    model.moveSelected(by: seconds, dragging: m)
                 } else {
                     model.move(m, in: song, to: model.seconds(of: m, in: song) + seconds)
                 }
@@ -711,6 +716,22 @@ struct TimelinePanel: View {
                     .padding(.leading, 6).padding(.trailing, 8)
                 barButton("chevron.left", "One frame earlier (⌥←)") { model.nudgeSelected(frames: -1) }
                 barButton("chevron.right", "One frame later (⌥→)") { model.nudgeSelected(frames: 1) }
+                if model.currentSong?.beatGrid != nil {
+                    Button { model.tightenSelected() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "metronome").font(.system(size: 11.5, weight: .semibold))
+                            Text("Onto the \(model.snapDivision.label.lowercased())").font(.manrope(12.5, .semibold))
+                            KeyCap(key: "Q")
+                        }
+                        .foregroundStyle(Brand.ink)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(.white.opacity(0.06)))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.locked)
+                    .help("Move what's selected onto the nearest \(model.snapDivision.label.lowercased()) of the beat grid (Q). ⌘Z puts it back.")
+                }
                 Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 18).padding(.horizontal, 4)
                 Button { model.deleteSelected() } label: {
                     HStack(spacing: 6) {
@@ -1147,5 +1168,219 @@ struct DeskRecordingLine: View {
         .lineLimit(1)
         .truncationMode(.tail)
         .help("GOs arrive as OSC /vivid/exec (\"1.201\") or MIDI Show Control. ⌘Z takes back what was recorded.")
+    }
+}
+
+// MARK: Beat grid
+
+/// Bar and beat lines behind the waveform and lanes: bars a little brighter, with their number;
+/// beats only once they're far enough apart to read, bars thinned out when zoomed far out.
+struct BeatGridLines: View, Equatable {
+    let grid: BeatGrid
+    let win: TimelineWindow
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        Canvas { ctx, size in
+            let w = Double(size.width)
+            guard w > 0, win.span > 0 else { return }
+            let perSecond = w / win.span
+            let beatPx = grid.beatLength * perSecond
+            let barPx = grid.barLength * perSecond
+            guard barPx >= 4 else { return }
+            // Every bar, or every 2nd, 4th… when they crowd; every beat once there's room.
+            var barEvery = 1
+            while Double(barEvery) * barPx < 10 { barEvery *= 2 }
+            let numberEvery = max(barEvery, Int((44 / barPx).rounded(.up)).nextPowerOfTwo)
+            for b in grid.beats(from: win.start, to: win.end) {
+                let x = win.x(b.time, width: w)
+                if b.isBar {
+                    guard (b.bar - 1) % barEvery == 0 else { continue }
+                    var p = Path()
+                    p.move(to: CGPoint(x: x, y: 0))
+                    p.addLine(to: CGPoint(x: x, y: size.height))
+                    ctx.stroke(p, with: .color(.white.opacity(0.13)), lineWidth: 1)
+                    if (b.bar - 1) % numberEvery == 0 {
+                        ctx.draw(Text("\(b.bar)").font(.manrope(10, .semibold).monospacedDigit()).foregroundColor(Brand.steel.opacity(0.75)),
+                                 at: CGPoint(x: x + 4, y: 9), anchor: .leading)
+                    }
+                } else if beatPx >= 9 {
+                    var p = Path()
+                    p.move(to: CGPoint(x: x, y: 0))
+                    p.addLine(to: CGPoint(x: x, y: size.height))
+                    ctx.stroke(p, with: .color(.white.opacity(0.045)), lineWidth: 1)
+                }
+            }
+        }
+        .frame(width: width, height: max(0, height))
+        .allowsHitTesting(false)
+    }
+}
+
+private extension Int {
+    /// The smallest power of two at or above this (1 for anything below 2).
+    var nextPowerOfTwo: Int {
+        var p = 1
+        while p < self { p *= 2 }
+        return p
+    }
+}
+
+/// The Beat grid button in the timeline's top bar: the tempo once there's a grid.
+struct BeatGridButton: View {
+    @EnvironmentObject private var model: AppModel
+    let compact: Bool
+    @State private var open = false
+
+    var body: some View {
+        let grid = model.currentSong?.beatGrid
+        Button { open.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "metronome").foregroundStyle(grid != nil ? Brand.gold : Brand.ink)
+                if !compact { Text(grid?.tempoText ?? "Beat grid") }
+                if model.findingBeat != nil { ProgressView().controlSize(.mini) }
+            }
+            .fixedSize()
+        }
+        .buttonStyle(QuietButtonStyle())
+        .help("Bars and beats on the timeline, found from the master or typed in")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            BeatGridPanel().environmentObject(model)
+        }
+    }
+}
+
+/// Finding and fixing the beat grid. Solid, like the other editors.
+struct BeatGridPanel: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var tempoText = ""
+
+    var body: some View {
+        let song = model.currentSong
+        let grid = song?.beatGrid
+        let busy = model.findingBeat != nil
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Beat grid").font(.manrope(17, .semibold)).foregroundStyle(Brand.ink)
+                Spacer()
+                if let grid { Text(meter(grid)).font(.manrope(12.5, .semibold).monospacedDigit()).foregroundStyle(Brand.gold) }
+            }
+            if let grid {
+                Text(fitText(grid)).font(.manrope(12.5)).foregroundStyle(grid.driftsAt != nil || (grid.fit ?? 1) < 0.8 ? Brand.warn : Brand.steel)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Find the tempo and the bars from the master, or type the tempo in. Nothing on the timeline moves.")
+                    .font(.manrope(12.5)).foregroundStyle(Brand.steel).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 10) {
+                Button {
+                    if let song { model.findBeat(for: song) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if busy { ProgressView().controlSize(.small) } else { Image(systemName: "waveform") }
+                        Text(busy ? "Listening…" : (grid == nil ? "Find the beat" : "Find again"))
+                    }
+                }
+                .buttonStyle(QuietButtonStyle(prominent: grid == nil))
+                .disabled(busy || song?.masterPath == nil)
+                .help(song?.masterPath == nil ? "This song has no master to listen to." : "Listens to the master for the tempo and bar 1")
+                Spacer()
+                TextField("BPM", text: $tempoText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.manrope(13).monospacedDigit())
+                    .frame(width: 74)
+                    .onSubmit(applyTempo)
+                    .typingField()
+                Button("Set") { applyTempo() }
+                    .buttonStyle(QuietButtonStyle())
+                    .disabled(Double(tempoText.replacingOccurrences(of: ",", with: ".")) == nil)
+            }
+            if grid != nil {
+                Divider().overlay(Color.white.opacity(0.06))
+                row("Tempo") {
+                    small("÷2", "Half as fast (it counted every beat twice)") { model.updateGrid { $0.halve() } }
+                    small("×2", "Twice as fast (it counted every other beat)") { model.updateGrid { $0.double() } }
+                }
+                row("Bar 1") {
+                    small("Starts at the playhead", "Make the playhead the start of a bar") { model.barStartsAtPlayhead() }
+                    small("◀ 1 beat", "Bars start a beat earlier") { model.updateGrid { $0.shiftBar(beats: -1) } }
+                    small("1 beat ▶", "Bars start a beat later") { model.updateGrid { $0.shiftBar(beats: 1) } }
+                }
+                row("Line up") {
+                    small("◀ 5 ms", "Move the whole grid 5 ms earlier") { model.updateGrid { $0.nudge(by: -0.005) } }
+                    small("5 ms ▶", "Move the whole grid 5 ms later") { model.updateGrid { $0.nudge(by: 0.005) } }
+                }
+                row("Beats in a bar") {
+                    Stepper("\(grid?.beatsPerBar ?? 4)", value: Binding(
+                        get: { model.currentSong?.beatGrid?.beatsPerBar ?? 4 },
+                        set: { n in model.updateGrid { $0.beatsPerBar = max(1, min(16, n)) } }), in: 1...16)
+                        .font(.manrope(12.5, .semibold).monospacedDigit())
+                        .fixedSize()
+                }
+                Divider().overlay(Color.white.opacity(0.06))
+                row("Snap") {
+                    Toggle("Dragged markers land on the grid", isOn: $model.snapToGrid)
+                        .toggleStyle(.switch).tint(Brand.gold).font(.manrope(12.5))
+                }
+                row("To the") {
+                    Picker("", selection: $model.snapDivision) {
+                        ForEach(BeatGrid.Division.allCases) { d in Text(d.label).tag(d) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 250)
+                }
+                HStack {
+                    Button { model.tightenSelected() } label: {
+                        HStack(spacing: 6) { Text("Selected onto the grid"); KeyCap(key: "Q") }
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                    .disabled(model.selectedMarkerIDs.isEmpty)
+                    .help("Moves what's selected in the timeline onto the nearest \(model.snapDivision.label.lowercased()). ⌘Z puts it back.")
+                    Spacer()
+                    Button("Remove grid") { model.removeGrid() }
+                        .buttonStyle(QuietButtonStyle())
+                }
+            }
+        }
+        .padding(18)
+        .frame(width: 430)
+        .background(Brand.phantom)
+        .disabled(model.locked)
+        .onAppear { tempoText = grid.map { String(format: "%.2f", $0.bpm) } ?? "" }
+        .onChange(of: grid?.bpm) { bpm in tempoText = bpm.map { String(format: "%.2f", $0) } ?? "" }
+    }
+
+    private func applyTempo() {
+        guard let bpm = Double(tempoText.replacingOccurrences(of: ",", with: ".")) else { return }
+        model.setTempo(bpm)
+    }
+
+    private func meter(_ g: BeatGrid) -> String { "\(g.tempoText) · \(g.beatsPerBar)/4" }
+
+    private func fitText(_ g: BeatGrid) -> String {
+        guard let fit = g.fit else { return "Typed in. Check it against the music by ear." }
+        if let at = g.driftsAt {
+            let s = max(0, Int(at.rounded()))
+            return String(format: "Found from the master. Fits up to %d:%02d, then the music moves off it (a tempo change or a live section).", s / 60, s % 60)
+        }
+        if fit < 0.8 { return "Found from the master, but only fits about \(Int(fit * 100))% of the song. Check it by ear." }
+        return "Found from the master. Fits the whole song."
+    }
+
+    private func row<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.manrope(12, .semibold)).foregroundStyle(Brand.space).frame(width: 96, alignment: .leading)
+            content()
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func small(_ title: String, _ help: String, _ action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(QuietButtonStyle())
+            .font(.manrope(12, .semibold))
+            .help(help)
     }
 }

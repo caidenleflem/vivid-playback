@@ -45,6 +45,8 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     /// How long the song's audio actually is, in seconds of file (the longer of the master and
     /// the timecode file), measured each time the files are checked. Nil with no audio.
     public var audioLength: Double? = nil
+    /// Bars and beats, once found from the master or typed in. Drawn only in the song timeline.
+    public var beatGrid: BeatGrid? = nil
 
     /// How long the song plays, from its start: the audio's own length once it has audio (longer
     /// or shorter than the sheet said), the sheet's length until then. The sheet is a starting
