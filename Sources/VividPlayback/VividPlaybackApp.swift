@@ -288,7 +288,7 @@ struct RootView: View {
         .sheet(isPresented: $model.addAlbumShown) { AddAlbumSheet().environmentObject(model) }
         .sheet(item: $model.showInfoEntry) { entry in ShowInfoSheet(entry: entry).environmentObject(model) }
         .sheet(isPresented: $model.labelsShown) { LabelsSheet().environmentObject(model).environmentObject(model.control) }
-        .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song).environmentObject(model) }
+        .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song, startAction: edit.action).environmentObject(model) }
         .sheet(item: $model.laneEdit) { lane in LaneEditor(lane: lane).environmentObject(model).environmentObject(model.control) }
     }
 }

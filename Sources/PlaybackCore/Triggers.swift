@@ -35,6 +35,12 @@ public struct ConsoleTarget: Codable, Hashable, Identifiable, Sendable {
 
 public enum LaneAction: String, Codable, CaseIterable, Sendable {
     case goPlus, goMinus, top, on, off, gotoCue, fader, custom
+    // The rest of the grandMA3 executor functions, each one word before the target.
+    case toggle, flash, temp, swap, select, pause, kill, learn, load, black
+    case rate1, speed1, doubleSpeed, halfSpeed, doubleRate, halfRate
+    /// Any other desk word before the target ("Flash Off"): the word is the trigger's (or the
+    /// lane's) command.
+    case command
 
     public var label: String {
         switch self {
@@ -46,8 +52,53 @@ public enum LaneAction: String, Codable, CaseIterable, Sendable {
         case .gotoCue: return "Goto cue"
         case .fader: return "Fader level"
         case .custom: return "Custom command"
+        case .command: return "Desk command"
+        default: return keyword ?? rawValue
         }
     }
+
+    /// The grandMA3 word for the one-word functions ("Toggle", "DoubleSpeed").
+    public var keyword: String? {
+        switch self {
+        case .goPlus: return "Go+"
+        case .goMinus: return "Go-"
+        case .top: return "Top"
+        case .on: return "On"
+        case .off: return "Off"
+        case .toggle: return "Toggle"
+        case .flash: return "Flash"
+        case .temp: return "Temp"
+        case .swap: return "Swap"
+        case .select: return "Select"
+        case .pause: return "Pause"
+        case .kill: return "Kill"
+        case .learn: return "Learn"
+        case .load: return "Load"
+        case .black: return "Black"
+        case .rate1: return "Rate1"
+        case .speed1: return "Speed1"
+        case .doubleSpeed: return "DoubleSpeed"
+        case .halfSpeed: return "HalfSpeed"
+        case .doubleRate: return "DoubleRate"
+        case .halfRate: return "HalfRate"
+        case .gotoCue, .fader, .custom, .command: return nil
+        }
+    }
+
+    /// The action for a desk word, ignoring case ("go+", "TOGGLE"). Nil when it isn't one.
+    public static func fromKeyword(_ word: String) -> LaneAction? {
+        let w = word.trimmingCharacters(in: .whitespaces).lowercased()
+        if w == "go" { return .goPlus }
+        if w == "goto" { return .gotoCue }
+        return allCases.first { $0.keyword?.lowercased() == w }
+    }
+
+    /// The functions a trigger can do, in the order they're offered.
+    public static let triggerChoices: [LaneAction] = [
+        .goPlus, .goMinus, .top, .gotoCue, .on, .off, .toggle, .flash, .temp, .swap,
+        .select, .pause, .kill, .learn, .load, .black, .rate1, .speed1, .doubleSpeed, .halfSpeed,
+        .doubleRate, .halfRate, .command, .custom,
+    ]
 }
 
 /// One executor, fired by the triggers on its lane.
@@ -136,23 +187,27 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
         // grandMA3 addresses an executor by its page ("Go+ Page 3.201"), a sequence by its name
         // or number ("Go+ Sequence 82").
         let target = self.target
-        switch marker?.action ?? action {
-        case .goPlus: return "Go+ \(target)"
-        case .goMinus: return "Go- \(target)"
-        case .top: return "Top \(target)"
-        case .on: return "On \(target)"
-        case .off: return "Off \(target)"
+        let act = marker?.action ?? action
+        // A trigger's own command (when it has its own action) wins over the lane's.
+        let ownCommand = marker?.action != nil ? marker?.command : nil
+        switch act {
         case .gotoCue:
             guard let cue = marker?.value else { return nil }
             return "Goto Cue \(Self.cueText(cue)) \(target)"
         case .fader: return nil
+        case .command:
+            let word = (ownCommand ?? command ?? "").trimmingCharacters(in: .whitespaces)
+            return word.isEmpty ? nil : "\(word) \(target)"
         case .custom:
-            let value = marker?.value.map { String(Int($0.rounded())) } ?? ""
-            return (command ?? "")
+            let value = marker?.value.map { $0 == $0.rounded() ? String(Int($0)) : Self.cueText($0) } ?? ""
+            return (ownCommand ?? command ?? "")
                 .replacingOccurrences(of: "{page}", with: String(page))
                 .replacingOccurrences(of: "{exec}", with: String(executor))
+                .replacingOccurrences(of: "{target}", with: target)
                 .replacingOccurrences(of: "{value}", with: value)
                 .replacingOccurrences(of: "{label}", with: marker?.label ?? "")
+        default:
+            return "\(act.keyword ?? act.label) \(target)"
         }
     }
 

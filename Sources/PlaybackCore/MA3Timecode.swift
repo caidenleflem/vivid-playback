@@ -9,8 +9,11 @@ public struct MA3Timecode: Equatable, Sendable {
     public struct Event: Equatable, Sendable {
         /// Seconds from the start of the timecode show.
         public var time: Double
-        /// What it does; nil for something Vivid can't send (it's counted, not guessed).
+        /// What it does. Any desk word Vivid has no name for comes through as `.command` with the
+        /// word itself, so nothing is dropped. Nil only for an event with no word at all.
         public var action: LaneAction?
+        /// For `.command`: the desk's word(s) ("Flash Off").
+        public var word: String?
         /// The desk's word for it ("Go+", "Off", "Flash"…).
         public var token: String
         /// The cue's name ("BEAT DROP") and number, when the event goes to one.
@@ -65,17 +68,15 @@ public struct MA3Timecode: Equatable, Sendable {
         return total
     }
 
-    /// The desk's command word as a lane action.
-    public static func action(_ token: String) -> LaneAction? {
-        switch token.trimmingCharacters(in: .whitespaces).lowercased() {
-        case "go+", "go": return .goPlus
-        case "go-": return .goMinus
-        case "top": return .top
-        case "on": return .on
-        case "off": return .off
-        case "goto": return .gotoCue
-        default: return nil
-        }
+    /// The desk's word as a lane action: one Vivid knows by name, or `.command` with the word.
+    /// `released`: a Flash, Temp or Swap key let go (the desk records the press and the release).
+    public static func action(_ token: String, released: Bool = false) -> (action: LaneAction, word: String?)? {
+        let t = token.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return nil }
+        let momentary = ["flash", "temp", "swap"].contains(t.lowercased())
+        if released && momentary { return (.command, "\(t) Off") }
+        if let a = LaneAction.fromKeyword(t) { return (a, nil) }
+        return (.command, t)
     }
 
     private final class Reader: NSObject, XMLParserDelegate {
@@ -104,13 +105,16 @@ public struct MA3Timecode: Equatable, Sendable {
             case "CmdEvent":
                 guard track != nil, let time = a["Time"].flatMap(MA3Timecode.seconds) else { event = nil; return }
                 let token = a["Name"] ?? ""
-                event = Event(time: time, action: MA3Timecode.action(token), token: token,
+                let mapped = MA3Timecode.action(token)
+                event = Event(time: time, action: mapped?.action, word: mapped?.word, token: token,
                               cueName: a["CueDestination"].flatMap { $0.isEmpty ? nil : $0 }, cueNumber: nil)
             case "RealtimeCmd":
                 guard event != nil else { return }
-                if let token = a["ExecToken"], !token.isEmpty {
+                let token = a["ExecToken"].flatMap { $0.isEmpty ? nil : $0 } ?? event?.token ?? ""
+                if let mapped = MA3Timecode.action(token, released: a["Status"]?.lowercased() == "off") {
                     event?.token = token
-                    event?.action = MA3Timecode.action(token)
+                    event?.action = mapped.action
+                    event?.word = mapped.word
                 }
                 // "0.5.1395.2000": the last number is the cue, in thousandths.
                 if let v = a["ValCueDestination"], let last = v.split(separator: ".").last, let n = Double(last), n > 0 {
@@ -167,67 +171,79 @@ public enum MA3TimecodeImport {
         public var lanesAdded = 0
         public var lanesReused = 0
         public var triggers = 0
-        /// Already on the lane at that frame.
-        public var duplicates = 0
+        /// Imported before (whether the trigger is still there, moved or deleted).
+        public var alreadyImported = 0
         /// Before the song's pre-roll or after its end.
         public var outside = 0
-        /// Events Vivid can't send (Flash, Temp…), by the desk's word.
-        public var unsupported: [String: Int] = [:]
+        /// Events with no word at all.
+        public var unreadable = 0
         /// How far the show's start is from the song's (seconds; the show's minus the song's).
         public var startDifference: Double = 0
     }
 
-    /// Adds the show to `song`. Lanes for the same sequence are reused; a trigger already there
-    /// (same lane, same frame, same action) isn't added twice.
+    /// The identity of a desk event: its sequence, its timecode to the millisecond, and its word.
+    public static func key(_ e: MA3Timecode.Event, track: MA3Timecode.Track, offset: Double) -> String {
+        "\(track.sequence.lowercased())|\(Int(((offset + e.time) * 1000).rounded()))|\(e.token.lowercased())|\((e.word ?? "").lowercased())"
+    }
+
+    /// Adds the show to `song`, bringing in only events not imported before. Lanes for the same
+    /// sequence are reused (one is made only when a track has something new).
     public static func apply(_ tc: MA3Timecode, to song: inout Song) -> Result {
         var r = Result()
         r.startDifference = tc.offset - song.start.seconds
         var lanes = song.triggerLanes ?? []
+        var imported = Set(song.importedDeskEvents ?? [])
         let fps = song.rate.framesPerSecond
         let minFrame = -Int((song.fileOffset * fps).rounded(.up))
         let maxFrame = song.playLength.map { Int(($0 * fps).rounded(.up)) }
         for (n, track) in tc.tracks.enumerated() {
-            let known = track.events.compactMap(\.action)
             // The lane does what most of the track does; the rest carry their own action.
-            let counts = Dictionary(known.map { ($0, 1) }, uniquingKeysWith: +)
-            let main = counts.max { $0.value < $1.value || ($0.value == $1.value && $0.key.rawValue > $1.key.rawValue) }?.key ?? .goPlus
-            let index: Int
-            if let i = lanes.firstIndex(where: { $0.sequence?.caseInsensitiveCompare(track.sequence) == .orderedSame }) {
-                index = i
-                r.lanesReused += 1
-            } else {
-                let name = track.name ?? (Int(track.sequence) != nil ? "Sequence \(track.sequence)" : track.sequence)
-                lanes.append(TriggerLane(name: name, page: 0, executor: 0, action: main == .gotoCue ? .goPlus : main,
-                                         color: (lanes.count + n) % 6, sequence: track.sequence))
-                index = lanes.count - 1
-                r.lanesAdded += 1
-            }
-            let lane = lanes[index]
+            let counts = Dictionary(track.events.compactMap(\.action).map { ($0, 1) }, uniquingKeysWith: +)
+            let main = counts.filter { $0.key != .gotoCue && $0.key != .command }
+                .max { $0.value < $1.value || ($0.value == $1.value && $0.key.rawValue > $1.key.rawValue) }?.key ?? .goPlus
+            var laneIndex = lanes.firstIndex { $0.sequence?.caseInsensitiveCompare(track.sequence) == .orderedSame }
+            let existed = laneIndex != nil
+            let before = r.triggers
+            defer { if existed && r.triggers > before { r.lanesReused += 1 } }
             for e in track.events {
-                guard let action = e.action, action != .gotoCue || e.cueNumber != nil else {
-                    r.unsupported[e.token, default: 0] += 1
-                    continue
-                }
+                guard let action = e.action else { r.unreadable += 1; continue }
+                let k = key(e, track: track, offset: tc.offset)
+                if imported.contains(k) { r.alreadyImported += 1; continue }
                 // The desk keeps milliseconds: the nearest frame (1:02.733 is frame 22 at 30 fps).
                 let tcode = Timecode(frameCount: Int(((tc.offset + e.time) * fps).rounded()), rate: song.rate)
                 let frame = tcode.frames(since: song.start)
-                if frame < minFrame || maxFrame.map({ frame > $0 }) == true {
-                    r.outside += 1
-                    continue
+                if frame < minFrame || maxFrame.map({ frame > $0 }) == true { r.outside += 1; continue }
+                if laneIndex == nil {
+                    let name = track.name ?? (Int(track.sequence) != nil ? "Sequence \(track.sequence)" : track.sequence)
+                    lanes.append(TriggerLane(name: name, page: 0, executor: 0, action: main,
+                                             color: (lanes.count + n) % 6, sequence: track.sequence))
+                    laneIndex = lanes.count - 1
+                    r.lanesAdded += 1
                 }
-                let own: LaneAction? = action == lane.action ? nil : action
+                guard let li = laneIndex else { continue }
+                let lane = lanes[li]
+                imported.insert(k)
+                // Already there from before this was remembered (same lane, frame and action).
                 if song.markers.contains(where: { $0.laneID == lane.id && abs($0.time.frames(since: song.start) - frame) <= 1
-                                                  && ($0.action ?? lane.action) == action }) {
-                    r.duplicates += 1
+                                                  && ($0.action ?? lane.action) == action && $0.command == e.word }) {
+                    r.alreadyImported += 1
                     continue
                 }
-                let label = action == .off ? "Off" : (e.cueName ?? e.cueNumber.map { "Cue \(TriggerLane.cueText($0))" } ?? action.label)
+                let label: String
+                switch action {
+                case .off: label = "Off"
+                case .command: label = e.word ?? e.token
+                default: label = e.cueName ?? e.cueNumber.map { "Cue \(TriggerLane.cueText($0))" } ?? action.label
+                }
+                let own = action == lane.action && action != .command ? nil : action
                 song.markers.append(Marker(time: tcode, label: label, laneID: lane.id,
-                                           value: action == .gotoCue ? e.cueNumber : nil, action: own))
+                                           value: action == .gotoCue ? e.cueNumber : nil, action: own,
+                                           command: own == .command ? e.word : nil))
                 r.triggers += 1
             }
         }
         song.triggerLanes = lanes.isEmpty ? nil : lanes
+        song.importedDeskEvents = imported.isEmpty ? nil : imported.sorted()
         song.markers.sort { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
         return r
     }

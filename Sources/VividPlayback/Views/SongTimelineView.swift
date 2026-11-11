@@ -931,6 +931,7 @@ struct TimelinePanel: View {
         // A recorded trigger that does something other than its lane says so.
         if let a = m.action, a != lane.action {
             if a == .gotoCue { return m.label.hasPrefix("Cue ") ? "Goto \(m.label)" : "Goto · \(m.label)" }
+            if a == .command, let word = m.command { return m.label == word ? word : "\(word) · \(m.label)" }
             return m.label == a.label ? a.label : "\(a.label) · \(m.label)"
         }
         guard lane.action == .fader, let v = m.value else { return m.label }
@@ -973,7 +974,22 @@ struct TimelinePanel: View {
             Button("Go to Trigger") { transport.locate(model.seconds(of: m, in: song)) }
             Button("Fire Now") { model.fire(m) }
             Divider()
-            Button("Rename…") { model.markerEdit = MarkerEdit(marker: m, song: song) }.disabled(model.locked)
+            Button("Edit Trigger…") { model.markerEdit = MarkerEdit(marker: m, song: song) }.disabled(model.locked)
+            if lane.action != .fader {
+                let targets = model.triggerTargets(m)
+                Menu(targets.count > 1 ? "Trigger (\(targets.count) selected)" : "Trigger") {
+                    Button("As the lane (\(lane.action.label))") { model.setTriggerAction(targets, to: nil) }
+                    Divider()
+                    ForEach(LaneAction.triggerChoices.filter { $0.keyword != nil }, id: \.self) { a in
+                        Button(a.label) { model.setTriggerAction(targets, to: a) }
+                    }
+                    Divider()
+                    Button("Goto Cue…") { model.markerEdit = MarkerEdit(marker: m, song: song, action: .gotoCue) }
+                    Button("Desk Command…") { model.markerEdit = MarkerEdit(marker: m, song: song, action: .command) }
+                    Button("Custom Command…") { model.markerEdit = MarkerEdit(marker: m, song: song, action: .custom) }
+                }
+                .disabled(model.locked)
+            }
             if lane.action == .fader || lane.action == .custom {
                 Menu(lane.action == .fader ? "Level" : "Value") {
                     ForEach([100.0, 75, 50, 25, 0], id: \.self) { v in

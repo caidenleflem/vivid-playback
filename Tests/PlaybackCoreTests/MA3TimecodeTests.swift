@@ -79,8 +79,8 @@ final class MA3TimecodeTests: XCTestCase {
         var s = song()
         let r = MA3TimecodeImport.apply(tc, to: &s)
         XCTAssertEqual(r.lanesAdded, 3)
-        XCTAssertEqual(r.triggers, 6)
-        XCTAssertEqual(r.unsupported, ["Flash": 1])
+        XCTAssertEqual(r.triggers, 7, "the Flash comes in too")
+        XCTAssertEqual(r.unreadable, 0)
         XCTAssertEqual(r.startDifference, 0, accuracy: 1e-9)
         let lanes = try XCTUnwrap(s.triggerLanes)
         XCTAssertEqual(lanes.map(\.name), ["DIVA", "DIVA INTRO ZZZ 1", "Sequence 82"])
@@ -106,9 +106,59 @@ final class MA3TimecodeTests: XCTestCase {
         _ = MA3TimecodeImport.apply(tc, to: &s)
         let again = MA3TimecodeImport.apply(tc, to: &s)
         XCTAssertEqual(again.lanesAdded, 0)
-        XCTAssertEqual(again.lanesReused, 3)
         XCTAssertEqual(again.triggers, 0)
-        XCTAssertEqual(again.duplicates, 6)
+        XCTAssertEqual(again.alreadyImported, 7)
+    }
+
+    func testReimportingBringsOnlyWhatsNewEvenAfterEditsHere() throws {
+        let tc = try XCTUnwrap(MA3Timecode.parse(Data(xml.utf8)).first)
+        var s = song()
+        _ = MA3TimecodeImport.apply(tc, to: &s)
+        // Here: one trigger moved, one deleted, and a lane deleted outright.
+        let i = try XCTUnwrap(s.markers.firstIndex { $0.label == "BEAT DROP" })
+        s.markers[i].time = s.markers[i].time.adding(frames: 15)
+        s.markers.removeAll { $0.label == "INTRO" }
+        let seq82 = try XCTUnwrap(s.triggerLanes?.first { $0.sequence == "82" })
+        s.triggerLanes?.removeAll { $0.id == seq82.id }
+        s.markers.removeAll { $0.laneID == seq82.id }
+        // The desk added one new event to the DIVA track.
+        let newer = xml.replacingOccurrences(of: "<CmdEvent Name=\"Go+\" Time=\"1m02.733\"",
+            with: "<CmdEvent Name=\"Go+\" Time=\"1m30.000\" CueDestination=\"BRIDGE\"><RealtimeCmd ExecToken=\"Go+\"/></CmdEvent><CmdEvent Name=\"Go+\" Time=\"1m02.733\"")
+        let tc2 = try XCTUnwrap(MA3Timecode.parse(Data(newer.utf8)).first)
+        let r = MA3TimecodeImport.apply(tc2, to: &s)
+        XCTAssertEqual(r.triggers, 1, "only the new BRIDGE")
+        XCTAssertEqual(r.lanesAdded, 0, "the deleted lane isn't brought back: nothing new on it")
+        XCTAssertEqual(r.lanesReused, 1)
+        XCTAssertNotNil(s.markers.first { $0.label == "BRIDGE" })
+        XCTAssertNil(s.markers.first { $0.label == "INTRO" }, "a trigger deleted here stays deleted")
+        XCTAssertEqual(s.markers.filter { $0.label == "BEAT DROP" }.count, 1, "a moved trigger isn't doubled")
+    }
+
+    func testEveryDeskWordComesIn() {
+        XCTAssertEqual(MA3Timecode.action("Toggle")?.action, .toggle)
+        XCTAssertEqual(MA3Timecode.action("go-")?.action, .goMinus)
+        XCTAssertEqual(MA3Timecode.action("Goto")?.action, .gotoCue)
+        XCTAssertEqual(MA3Timecode.action("DoubleSpeed")?.action, .doubleSpeed)
+        let release = MA3Timecode.action("Flash", released: true)
+        XCTAssertEqual(release?.action, .command)
+        XCTAssertEqual(release?.word, "Flash Off", "a Flash key let go")
+        XCTAssertEqual(MA3Timecode.action("Fade")?.action, .command)
+        XCTAssertEqual(MA3Timecode.action("Fade")?.word, "Fade", "an unknown word is kept as it is")
+        XCTAssertNil(MA3Timecode.action(""))
+    }
+
+    func testEachTriggerCanDoItsOwnThing() {
+        let lane = TriggerLane(page: 3, executor: 201)
+        let t = Timecode(frameCount: 0, rate: .fps30)
+        XCTAssertEqual(lane.commandLine(for: Marker(time: t, label: "x", action: .toggle)), "Toggle Page 3.201")
+        XCTAssertEqual(lane.commandLine(for: Marker(time: t, label: "x", action: .doubleSpeed)), "DoubleSpeed Page 3.201")
+        XCTAssertEqual(lane.commandLine(for: Marker(time: t, label: "x", action: .command, command: "Flash Off")), "Flash Off Page 3.201")
+        XCTAssertEqual(lane.commandLine(for: Marker(time: t, label: "x", value: 3, action: .custom, command: "Goto Cue {value} {target} Fade 2")),
+                       "Goto Cue 3 Page 3.201 Fade 2")
+        XCTAssertEqual(lane.commandLine(for: Marker(time: t, label: "x")), "Go+ Page 3.201", "no action of its own: the lane's")
+        let seq = TriggerLane(page: 0, executor: 0, sequence: "DIVA")
+        XCTAssertEqual(seq.commandLine(for: Marker(time: t, label: "x", action: .flash)), "Flash Sequence \"DIVA\"")
+        XCTAssertEqual(LaneAction.fromKeyword("halfrate"), .halfRate)
     }
 
     func testADifferentStartIsReportedAndEventsOutsideTheSongAreLeftOut() throws {

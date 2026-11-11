@@ -389,19 +389,58 @@ struct RenameMarkerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let marker: Marker
     let song: Song
+    var startAction: LaneAction? = nil
     @State private var text = ""
     @State private var level: Double = 100
+    /// What this trigger does; nil does what its lane does.
+    @State private var action: LaneAction?
+    @State private var cueText = ""
+    @State private var command = ""
 
     private var lane: TriggerLane? { model.lanes.first { $0.id == marker.laneID } }
-    private var hasValue: Bool { lane?.action == .fader || lane?.action == .custom }
+    private var doing: LaneAction? { action ?? lane?.action }
+    private var hasLevel: Bool { lane?.action == .fader }
 
     var body: some View {
-        SheetFrame(title: lane == nil ? "Rename marker" : "Trigger", subtitle: lane.map { "On \($0.title), at \(marker.time.description)." }, width: 440) {
+        SheetFrame(title: lane == nil ? "Rename marker" : "Trigger", subtitle: lane.map { "On \($0.title), at \(marker.time.description)." }, width: 460) {
             TextField(lane == nil ? "Marker name" : "Trigger name", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .font(.manrope(15))
                 .onSubmit(save)
-            if hasValue, let lane {
+            if let lane, lane.action != .fader {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Text("Does").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel).frame(width: 60, alignment: .leading)
+                        Picker("", selection: $action) {
+                            Text("As the lane (\(lane.action.label))").tag(LaneAction?.none)
+                            Divider()
+                            ForEach(LaneAction.triggerChoices, id: \.self) { a in Text(a.label).tag(Optional(a)) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 240)
+                    }
+                    if doing == .gotoCue {
+                        HStack(spacing: 10) {
+                            Text("Cue").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel).frame(width: 60, alignment: .leading)
+                            TextField("5", text: $cueText).textFieldStyle(.roundedBorder).font(.manrope(13).monospacedDigit()).frame(width: 90)
+                        }
+                    } else if doing == .command {
+                        HStack(spacing: 10) {
+                            Text("Word").font(.manrope(12.5, .semibold)).foregroundStyle(Brand.steel).frame(width: 60, alignment: .leading)
+                            TextField("Flash Off", text: $command).textFieldStyle(.roundedBorder).font(.system(size: 13, design: .monospaced))
+                        }
+                    } else if action == .custom {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("Goto Cue {value} {target} Fade 2", text: $command)
+                                .textFieldStyle(.roundedBorder).font(.system(size: 13, design: .monospaced))
+                            Text("{target} is this lane's executor or sequence, {value} the value below, {label} the trigger's name.")
+                                .font(.manrope(11.5)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Text(preview(lane)).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Brand.champagne).lineLimit(2)
+                }
+            }
+            if let lane, hasLevel || doing == .custom {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text(lane.action == .fader ? "Fader level" : "Value for {value}")
@@ -423,12 +462,32 @@ struct RenameMarkerSheet: View {
         .onAppear {
             text = marker.label
             level = marker.value ?? 100
+            action = startAction ?? marker.action
+            cueText = marker.value.map { TriggerLane.cueText($0) } ?? ""
+            command = marker.command ?? (startAction == .custom ? (lane?.command ?? "") : "")
         }
+    }
+
+    /// The command this trigger will send, as it stands in the editor.
+    private func preview(_ lane: TriggerLane) -> String {
+        var m = marker
+        m.action = action
+        m.command = command.isEmpty ? nil : command
+        if action == .gotoCue { m.value = Double(cueText.replacingOccurrences(of: ",", with: ".")) }
+        if action == .custom { m.value = level }
+        if let line = lane.commandLine(for: m) { return "Sends: \(line)" }
+        return "Sends nothing yet: fill in the \(action == .gotoCue ? "cue" : "command")."
     }
 
     private func save() {
         model.renameMarker(marker, in: song, to: text)
-        if hasValue { model.setLevel(marker, in: song, to: level) }
+        if let lane, lane.action != .fader {
+            let cue = Double(cueText.replacingOccurrences(of: ",", with: "."))
+            model.setTriggerAction([marker.id], to: action,
+                                   value: action == .gotoCue ? cue : (action == .custom ? level : nil),
+                                   command: command.isEmpty ? nil : command)
+        }
+        if hasLevel { model.setLevel(marker, in: song, to: level) }
         dismiss()
     }
 }
@@ -444,6 +503,8 @@ struct LaneEditor: View {
     private var consoles: [ConsoleTarget] { control.settings.consoles }
 
     private static let actions: [LaneAction] = [.goPlus, .goMinus, .top, .on, .off, .fader, .custom]
+    /// Everything else a lane can do, in a menu beside the pills.
+    private static let more: [LaneAction] = LaneAction.triggerChoices.filter { !actions.contains($0) && $0 != .gotoCue }
     private static func short(_ a: LaneAction) -> String {
         switch a {
         case .fader: return "Fader"
@@ -500,15 +561,29 @@ struct LaneEditor: View {
 
             field("Action") {
                 VStack(alignment: .leading, spacing: 10) {
-                    PillPicker(options: Self.actions, selection: $lane.action) { Self.short($0) }
+                    HStack(spacing: 10) {
+                        PillPicker(options: Self.actions, selection: $lane.action) { Self.short($0) }
+                        Menu {
+                            ForEach(Self.more, id: \.self) { a in Button(a.label) { lane.action = a } }
+                        } label: {
+                            Text(Self.more.contains(lane.action) ? lane.action.label : "More")
+                                .font(.manrope(12.5, .semibold))
+                                .foregroundStyle(Self.more.contains(lane.action) ? Brand.gold : Brand.steel)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
                     switch lane.action {
+                    case .command:
+                        TextField("Desk word, e.g. Flash Off", text: Binding(get: { lane.command ?? "" }, set: { lane.command = $0 }))
+                            .textFieldStyle(.roundedBorder).font(.system(size: 13, design: .monospaced))
                     case .fader:
                         Text("Each trigger sets the fader to its level. New triggers start at 100%; right-click one to change it.")
                             .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
                     case .custom:
-                        TextField("Go+ Page {page}.{exec}", text: Binding(get: { lane.command ?? "" }, set: { lane.command = $0 }))
+                        TextField("Go+ {target}", text: Binding(get: { lane.command ?? "" }, set: { lane.command = $0 }))
                             .textFieldStyle(.roundedBorder).font(.system(size: 13, design: .monospaced))
-                        Text("Any command line. {page} and {exec} are this lane's executor, {label} the trigger's name, {value} its value.")
+                        Text("Any command line. {target} is this lane's executor or sequence ({page} and {exec} too), {label} the trigger's name, {value} its value.")
                             .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
                     default:
                         EmptyView()

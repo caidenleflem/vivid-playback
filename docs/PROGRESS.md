@@ -741,3 +741,25 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   DIVA export: 9 lanes, 247 triggers, nothing outside or unsupported. 179 tests pass.
 - Caiden didn't ask for the record-arm and timecode-listing work just before this; it stays (it's
   harmless) but isn't the direction. He mentioned needing "a new one" (likely a re-saved plugin).
+
+## 2026-11-11: every trigger type, per-trigger actions, re-import only new
+
+- **Every grandMA3 executor function** as a trigger: Go+, Go−, Top, Goto cue, On, Off, Toggle,
+  Flash, Temp, Swap, Select, Pause, Kill, Learn, Load, Black, Rate1, Speed1, DoubleSpeed,
+  HalfSpeed, DoubleRate, HalfRate, plus **Desk command** (any word before the target, e.g.
+  "Flash Off") and Custom (a whole line; `{target}` added alongside {page} {exec} {value} {label}).
+  The lane editor offers the rest under More.
+- **Each trigger can do its own thing:** right-click a trigger › Trigger (applies to the whole
+  selection when it's in it): As the lane, any function, Goto Cue…, Desk Command…, Custom
+  Command…. Edit Trigger… shows what it does, its cue or command, and exactly what it'll send.
+  The timeline names a trigger's own action ("Toggle · HITS", "Flash Off").
+- **Import keeps every desk word:** known ones by name, anything else as a Desk command with the
+  desk's word; a Flash/Temp/Swap release (Status Off) as "<word> Off". Only events with no word at
+  all are left out (and counted).
+- **Re-importing brings only new data:** each song remembers the desk events it imported
+  (sequence, timecode to the millisecond, word). Importing again adds only events new on the
+  desk, even after imported triggers were moved or deleted here; a deleted lane isn't brought back
+  unless its track has something new. The real DIVA file: 247 then 0.
+- Core: new `LaneAction` cases and `keyword`, `Marker.command`, `Song.importedDeskEvents`. 182
+  tests pass.
+- **Needs a check on the desk:** the one-word functions and "Flash Off" as command lines.

@@ -11,9 +11,12 @@ public struct Marker: Codable, Hashable, Identifiable, Sendable {
     /// What this trigger does, when it isn't its lane's action (recorded from the desk: the
     /// sequence went back, or jumped to a cue). Nil does what the lane does.
     public var action: LaneAction?
+    /// With its own action: the desk word (Desk command) or the command line (Custom).
+    public var command: String?
 
     public init(id: UUID = UUID(), time: Timecode, label: String, laneID: UUID? = nil, value: Double? = nil,
-                action: LaneAction? = nil) {
+                action: LaneAction? = nil, command: String? = nil) {
+        self.command = command
         self.id = id
         self.time = time
         self.label = label
@@ -52,6 +55,9 @@ public struct Song: Codable, Hashable, Identifiable, Sendable {
     public var audioLength: Double? = nil
     /// Bars and beats, once found from the master or typed in. Drawn only in the song timeline.
     public var beatGrid: BeatGrid? = nil
+    /// The grandMA3 timecode events already imported into this song, so importing again only
+    /// brings in what's new on the desk (even after triggers were moved or deleted here).
+    public var importedDeskEvents: [String]? = nil
 
     /// How long the song plays, from its start: the audio's own length once it has audio (longer
     /// or shorter than the sheet said), the sheet's length until then. The sheet is a starting

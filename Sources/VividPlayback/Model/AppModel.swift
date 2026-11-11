@@ -113,6 +113,8 @@ struct FixUndo {
 struct MarkerEdit: Identifiable {
     let marker: Marker
     let song: Song
+    /// Open on choosing this action (from the Trigger menu).
+    var action: LaneAction? = nil
     var id: UUID { marker.id }
 }
 
@@ -1164,6 +1166,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Sets what the given triggers do: nil does what their lane does. `value` is the cue for
+    /// Goto (or {value} for Custom); `command` the word (Desk command) or line (Custom).
+    func setTriggerAction(_ ids: Set<UUID>, to action: LaneAction?, value: Double? = nil, command: String? = nil) {
+        guard let song = currentSong, !locked, !ids.isEmpty else { return }
+        rememberMarkers(of: song)
+        let lanesByID = Dictionary(uniqueKeysWithValues: lanes.map { ($0.id, $0) })
+        edit { show in
+            guard let s = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
+            for m in show.songs[s].markers.indices where ids.contains(show.songs[s].markers[m].id) {
+                let laneAction = show.songs[s].markers[m].laneID.flatMap { lanesByID[$0]?.action }
+                let own = action == laneAction && action != .command && action != .custom ? nil : action
+                show.songs[s].markers[m].action = own
+                show.songs[s].markers[m].command = (own == .command || own == .custom) ? command : nil
+                if own == .gotoCue || own == .custom { show.songs[s].markers[m].value = value ?? show.songs[s].markers[m].value }
+            }
+        }
+    }
+
+    /// The triggers a menu acts on: the whole selection when the clicked one is in it.
+    func triggerTargets(_ m: Marker) -> Set<UUID> {
+        selectedMarkerIDs.count > 1 && selectedMarkerIDs.contains(m.id) ? selectedMarkerIDs : [m.id]
+    }
+
     /// Imports grandMA3 timecode shows (their exported XML) as lanes and triggers: each show onto
     /// its song (by name, else by timecode, else the selected song), one lane per track firing its
     /// sequence, one trigger per event, placed by timecode. One notice, one Undo.
@@ -1206,14 +1231,16 @@ final class AppModel: ObservableObject {
                 case .timecode: line += " (by its timecode)"
                 case .selected: line += " (the selected song: no song is named \(tc.name) or plays at its timecode)"
                 }
-                line += ": \(r.triggers) trigger\(r.triggers == 1 ? "" : "s") on \(r.lanesAdded + r.lanesReused) lane\(r.lanesAdded + r.lanesReused == 1 ? "" : "s")"
-                if r.lanesAdded > 0 && r.lanesReused > 0 { line += " (\(r.lanesAdded) new)" }
-                line += "."
-                if r.duplicates > 0 { line += " \(r.duplicates) already there." }
-                if r.outside > 0 { line += " \(r.outside) fall outside the song, left out." }
-                if !r.unsupported.isEmpty {
-                    line += " Not imported: " + r.unsupported.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }.joined(separator: ", ") + "."
+                if r.triggers == 0 {
+                    line += ": nothing new"
+                } else {
+                    line += ": \(r.triggers) new trigger\(r.triggers == 1 ? "" : "s")"
+                    if r.lanesAdded > 0 { line += ", \(r.lanesAdded) new lane\(r.lanesAdded == 1 ? "" : "s")" }
                 }
+                line += "."
+                if r.alreadyImported > 0 { line += " \(r.alreadyImported) imported before, left as they are here." }
+                if r.outside > 0 { line += " \(r.outside) fall outside the song, left out." }
+                if r.unreadable > 0 { line += " \(r.unreadable) had no command, left out." }
                 if tc.otherTracks > 0 { line += " \(tc.otherTracks) track\(tc.otherTracks == 1 ? "" : "s") fire something other than a sequence, left out." }
                 if abs(r.startDifference) >= 1 / show.songs[i].rate.framesPerSecond {
                     let showStart = Timecode(frameCount: Int((tc.offset * show.songs[i].rate.framesPerSecond).rounded()), rate: show.songs[i].rate)
