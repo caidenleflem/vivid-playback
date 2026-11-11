@@ -206,7 +206,9 @@ final class AppModel: ObservableObject {
     init() {
         transport.onSongEnd = { [weak self] in self?.advanceAfterSongEnd() }
         transport.wantedNext = { [weak self] in
-            guard let self, !self.stopAfterEach else { return nil }
+            // Recording from the desk stays on the selected song: it stops at the end instead of
+            // running on into the next one.
+            guard let self, !self.stopAfterEach, !self.recordingFromDesk else { return nil }
             return self.nextSong
         }
         transport.onAdvance = { [weak self] song in self?.ranOn(into: song) }
@@ -219,6 +221,7 @@ final class AppModel: ObservableObject {
         control.followRate = { [weak self] in self?.show?.defaultRate ?? .fps30 }
         control.onTriggerSettingsChange = { [weak self] in self?.syncTriggers() }
         control.onDeskGo = { [weak self] go in self?.deskGo(go) }
+        control.onDeskSequence = { [weak self] event in self?.deskSequence(event) }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .magnify]) { [weak self] event in
             guard let self else { return event }
             return self.handle(event) ? nil : event
@@ -910,14 +913,15 @@ final class AppModel: ObservableObject {
 
     /// A trigger on `lane` in the current song, `seconds` from its start (any screen).
     @discardableResult
-    private func insertTrigger(on lane: TriggerLane, at seconds: Double, label: String? = nil) -> Marker? {
+    private func insertTrigger(on lane: TriggerLane, at seconds: Double, label: String? = nil,
+                               action: LaneAction? = nil, value: Double? = nil) -> Marker? {
         guard !locked, let song = currentSong else { return nil }
         rememberMarkers(of: song)
         selectedLaneID = lane.id
         let tc = timecode(for: song, at: max(0, seconds))
         let count = song.markers.filter { $0.laneID == lane.id }.count + 1
         let marker = Marker(time: tc, label: label ?? (lane.action == .fader ? "Level" : "\(lane.action.label) \(count)"),
-                            laneID: lane.id, value: lane.action == .fader ? 100 : nil)
+                            laneID: lane.id, value: value ?? (lane.action == .fader ? 100 : nil), action: action)
         withAnimation(.vivid(0.35)) {
             edit { show in
                 guard let i = show.songs.firstIndex(where: { $0.id == song.id }) else { return }
@@ -984,8 +988,72 @@ final class AppModel: ObservableObject {
         control.listenForDesk(recordingFromDesk)
         if recordingFromDesk {
             let osc = control.settings.oscIn ? "OSC /vivid/exec on port \(control.settings.oscPort)" : "OSC (turn on OSC in under Connections)"
-            post("Recording GOs from the desk: \(osc), and MIDI Show Control over MIDI or port \(control.settings.mscPort). Play a song and fire away.")
+            post("Recording from the desk onto \(currentSong?.title ?? "the selected song"): the Vivid Recorder plugin or \(osc), and MIDI Show Control over MIDI or port \(control.settings.mscPort). It stops at the end of the song. Play it and fire away.")
         }
+    }
+
+    /// A sequence on the desk changed cue (the Vivid Recorder plugin, which only watches the
+    /// fader page the desk is on). Recorded onto the selected song, on that executor's lane, as
+    /// what the sequence did: Go+, Go-, Top, Goto a cue, On or Off.
+    func deskSequence(_ e: DeskSequenceEvent) {
+        let from = "\(e.page).\(e.executor) \(e.action.label)\(e.isOn && e.cue != nil ? " cue \(TriggerLane.cueText(e.cue!))" : "")"
+        guard recordingFromDesk else { lastDeskGo = ("\(from) · not recording", Date()); return }
+        guard !locked, currentSong != nil else { lastDeskGo = ("\(from) · nothing selected", Date()); return }
+        guard transport.isPlaying else { lastDeskGo = ("\(from) · play the song to record it", Date()); return }
+        let seconds = transport.position()
+        var lane = DeskRecorder.lane(for: e, in: lanes)
+        if lane == nil {
+            let made = TriggerLane(page: e.page, executor: e.executor, color: lanes.count % 6, key: TriggerLane.freeKey(in: lanes))
+            saveLane(made)
+            lane = made
+        }
+        guard let lane, let fresh = currentSong else { return }
+        let frame = timecode(for: fresh, at: max(0, seconds)).frames(since: fresh.start)
+        let existing = fresh.markers.filter { $0.laneID == lane.id }.map { $0.time.frames(since: fresh.start) }
+        if DeskRecorder.isDuplicate(frame: frame, existing: existing) {
+            lastDeskGo = ("\(from) · already on \(lane.title) here", Date())
+            return
+        }
+        let action = e.action
+        guard let marker = insertTrigger(on: lane, at: seconds, label: e.label,
+                                         action: action == lane.action ? nil : action,
+                                         value: action == .gotoCue ? e.cue : nil) else { return }
+        control.flash(marker.id, lane: lane.id)
+        lastDeskGo = ("\(from) → \(lane.title) at \(marker.time)", Date())
+    }
+
+    /// Writes the Vivid Recorder plugin for the grandMA3 (its XML and Lua) into a folder, for a
+    /// USB stick's grandMA3_library/plugins.
+    func saveDeskPlugin() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Save Here"
+        panel.message = "Choose where to save the Vivid Recorder plugin. On a USB stick for the desk: grandMA3_library › plugins."
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        do {
+            for f in DeskPlugin.files(oscLine: 1) {
+                try f.contents.write(to: folder.appendingPathComponent(f.name), atomically: true, encoding: .utf8)
+            }
+            post("Saved VividRecorder.xml and .lua. On the desk: import the plugin, then run it to start recording and again to stop. It sends on OSC line 1; change OSC_LINE at the top of the .lua if yours is another.")
+            NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent("\(DeskPlugin.name).xml")])
+        } catch {
+            post("Couldn't save the plugin: \(error.localizedDescription)")
+        }
+    }
+
+    /// The command for a desk macro that selects this song in Vivid Playback.
+    func deskCommand(for song: Song) -> String {
+        if let n = song.number { return "SendOSC 1 \"/vivid/song,i,\(n)\"" }
+        let title = song.title.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: ",", with: " ")
+        return "SendOSC 1 \"/vivid/song,s,\(title)\""
+    }
+
+    func copyDeskCommand(for song: Song) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(deskCommand(for: song), forType: .string)
+        post("Copied \(deskCommand(for: song)). Put it in the song's macro on the desk (OSC in must be on here).")
     }
 
     func deskGo(_ go: DeskGo) {

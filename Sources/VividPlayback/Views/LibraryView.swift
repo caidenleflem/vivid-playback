@@ -541,6 +541,8 @@ struct SongList: View {
         .contextMenu {
             Button("Cue This Song") { model.cue(song) }.disabled(skipped)
             Button("Open Timeline") { model.cue(song); model.go(.timeline) }.disabled(skipped)
+            Button("Copy Desk Command") { model.copyDeskCommand(for: song) }
+                .help("A SendOSC line for a grandMA3 macro that selects this song here")
             Divider()
             Group {
                 Button("Move Up") { model.moveUp(song) }

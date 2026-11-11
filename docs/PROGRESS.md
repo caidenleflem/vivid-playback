@@ -584,3 +584,28 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - Caiden: the meters are still glitchy after the 60 Hz / hold-between-blocks change. Likely the
   same root as the timeline (the main thread busy redrawing, so meter reads and redraws come late
   and uneven), or the peak reset racing the audio thread. Look at both together.
+
+## 2026-11-11: Vivid Recorder plugin for grandMA3, songs from desk macros
+
+- **Vivid Recorder** (Timeline › Save grandMA3 Plugin…, or Connections › Record from the desk):
+  writes `VividRecorder.xml` and `.lua` for the desk (made for 2.3.2.0). Run it once to start
+  and again to stop. Every 20 ms it looks at the executors with a sequence on the fader page the
+  desk is on (only that page; a page change only learns where things are) and, when one changes
+  cue or goes on/off, sends `/vivid/seq "3.201" "on" "5" "4" "3" "on" "Chorus"` with SendOSC on
+  OSC line 1 (OSC_LINE at the top of the .lua). `Plugin "Vivid Recorder" "test"` prints what it
+  sees on the command line, to check it against the desk.
+- The app records what the sequence did, so playback puts it back the same way: next cue Go+,
+  previous Go-, first cue Top, back on where it was On, off Off, anything else Goto that cue
+  (`Goto Cue 5 Page 3.201`). Triggers carry their own action when it isn't their lane's, and the
+  timeline shows it ("Go− · Verse", "Goto Cue 5"). Cue names become the triggers' names.
+- Recording stays on the selected song: while recording, the song stops at its end instead of
+  running on into the next.
+- **Song macros:** `/vivid/song` already selected a song by number or title; each song's menu
+  now has Copy Desk Command (`SendOSC 1 "/vivid/song,i,12"`) to paste into its macro.
+- Core: `DeskSequenceEvent` (reading the plugin, deciding the action), `Marker.action`,
+  `LaneAction.gotoCue`, `DeskPlugin` (the files). The plugin was run against a mock desk (Lua
+  5.5 here): Go+, Go-, Goto 5, Top, Off, On and a second sequence each sent one message, a page
+  change sent nothing, a second run stopped it. 163 tests pass.
+- **Needs a check on the desk (2.3.2.0):** the plugin imports (XML shape), `CurrentExecPage`,
+  executor `Object`, `seq:CurrentChild()` and cue `No` read as expected (run the "test"
+  argument), SendOSC arrives, and `Goto Cue 5 Page 3.201` is the right Goto.

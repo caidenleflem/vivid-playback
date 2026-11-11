@@ -109,3 +109,75 @@ public enum DeskRecorder {
         existing.contains { abs($0 - frame) <= tolerance }
     }
 }
+
+/// What a sequence on the desk just did, sent by the Vivid Recorder plugin on the grandMA3:
+/// `/vivid/seq "3.201" "on" "5" "4" "3" "on" "Chorus"`: the executor (page.executor), on or off,
+/// the cue it's on now, that cue's place in the list (0 = the first cue), the place it was at
+/// before, whether it was on before, and the cue's name. A "-" or -1 is "not known".
+public struct DeskSequenceEvent: Equatable, Sendable {
+    public var page: Int
+    public var executor: Int
+    public var isOn: Bool
+    public var cue: Double?
+    public var index: Int?
+    public var previousIndex: Int?
+    public var wasOn: Bool
+    public var name: String?
+
+    public init(page: Int, executor: Int, isOn: Bool, cue: Double?, index: Int?, previousIndex: Int?,
+                wasOn: Bool, name: String? = nil) {
+        self.page = page
+        self.executor = executor
+        self.isOn = isOn
+        self.cue = cue
+        self.index = index
+        self.previousIndex = previousIndex
+        self.wasOn = wasOn
+        self.name = name
+    }
+
+    public static func from(_ m: OSCMessage) -> DeskSequenceEvent? {
+        let parts = m.address.lowercased().split(separator: "/")
+        guard parts.count == 2, parts[0] == "vivid", parts[1] == "seq", m.arguments.count >= 6 else { return nil }
+        let a = m.arguments.map { $0.text.trimmingCharacters(in: .whitespaces) }
+        guard let ref = DeskGo.executorRef(a[0]), let page = ref.page else { return nil }
+        func on(_ s: String) -> Bool { ["on", "1", "true"].contains(s.lowercased()) }
+        func index(_ s: String) -> Int? { Int(s).flatMap { $0 >= 0 ? $0 : nil } }
+        let name = a.count > 6 ? a[6] : ""
+        return DeskSequenceEvent(page: page, executor: ref.executor, isOn: on(a[1]),
+                                 cue: Double(a[2].replacingOccurrences(of: ",", with: ".")),
+                                 index: index(a[3]), previousIndex: index(a[4]), wasOn: on(a[5]),
+                                 name: name.isEmpty || name == "-" ? nil : name)
+    }
+
+    /// What to record, so playing it back puts the sequence where the desk put it: the next cue
+    /// is Go+, the one before is Go-, back to the first is Top, back on where it was is On, off
+    /// is Off, and anything else is a Goto to that cue.
+    public var action: LaneAction {
+        guard isOn else { return .off }
+        if !wasOn {
+            if let i = index, i == previousIndex { return .on }
+            return cue == nil ? .on : .gotoCue
+        }
+        if let i = index, let p = previousIndex {
+            if i == p + 1 { return .goPlus }
+            if i == p - 1 { return .goMinus }
+            if i == 0 && p > 0 { return .top }
+        }
+        return cue == nil ? .goPlus : .gotoCue
+    }
+
+    /// The trigger's name: the cue's name, or "Cue 5", or "Off".
+    public var label: String {
+        if !isOn { return "Off" }
+        if let name, !name.isEmpty { return name }
+        return cue.map { "Cue \(TriggerLane.cueText($0))" } ?? action.label
+    }
+}
+
+extension DeskRecorder {
+    /// The lane a sequence change lands on: the one for exactly that page and executor.
+    public static func lane(for event: DeskSequenceEvent, in lanes: [TriggerLane]) -> TriggerLane? {
+        lanes.first { $0.page == event.page && $0.executor == event.executor }
+    }
+}

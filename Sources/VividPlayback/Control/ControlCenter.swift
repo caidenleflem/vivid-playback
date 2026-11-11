@@ -181,6 +181,8 @@ final class ControlCenter: ObservableObject {
     var onCommand: ((RemoteCommand) -> Void)?
     /// A GO from the desk (OSC /vivid/exec or MIDI Show Control), for Record from the desk.
     var onDeskGo: ((DeskGo) -> Void)?
+    /// A sequence on the desk changed cue, from the Vivid Recorder plugin.
+    var onDeskSequence: ((DeskSequenceEvent) -> Void)?
     private var mscIn: UDPSocket?
     @Published private(set) var deskStatus = ""
     var onFollow: (([ChaseEngine.Action]) -> Void)?
@@ -276,6 +278,7 @@ final class ControlCenter: ObservableObject {
             let messages = OSCMessage.parse(data)
             Task { @MainActor in
                 for m in messages {
+                    if let event = DeskSequenceEvent.from(m) { self?.onDeskSequence?(event); continue }
                     if let go = DeskGo.from(m) { self?.onDeskGo?(go); continue }
                     guard let cmd = RemoteCommand.from(m) else { continue }
                     self?.run(cmd, from: "OSC \(m.address) from \(from)")

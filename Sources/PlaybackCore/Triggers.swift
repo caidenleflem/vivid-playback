@@ -34,7 +34,7 @@ public struct ConsoleTarget: Codable, Hashable, Identifiable, Sendable {
 }
 
 public enum LaneAction: String, Codable, CaseIterable, Sendable {
-    case goPlus, goMinus, top, on, off, fader, custom
+    case goPlus, goMinus, top, on, off, gotoCue, fader, custom
 
     public var label: String {
         switch self {
@@ -43,6 +43,7 @@ public enum LaneAction: String, Codable, CaseIterable, Sendable {
         case .top: return "Top"
         case .on: return "On"
         case .off: return "Off"
+        case .gotoCue: return "Goto cue"
         case .fader: return "Fader level"
         case .custom: return "Custom command"
         }
@@ -116,12 +117,15 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
     public func commandLine(for marker: Marker? = nil) -> String? {
         // grandMA3 addresses an executor by its page: "Go+ Page 3.201".
         let target = "Page \(page).\(executor)"
-        switch action {
+        switch marker?.action ?? action {
         case .goPlus: return "Go+ \(target)"
         case .goMinus: return "Go- \(target)"
         case .top: return "Top \(target)"
         case .on: return "On \(target)"
         case .off: return "Off \(target)"
+        case .gotoCue:
+            guard let cue = marker?.value else { return nil }
+            return "Goto Cue \(Self.cueText(cue)) \(target)"
         case .fader: return nil
         case .custom:
             let value = marker?.value.map { String(Int($0.rounded())) } ?? ""
@@ -134,8 +138,13 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
     }
 
     /// The OSC messages a trigger sends to one console.
+    /// "5", "5.5": a cue number as the desk writes it.
+    public static func cueText(_ n: Double) -> String {
+        n == n.rounded() ? String(Int(n)) : String(format: "%g", n)
+    }
+
     public func messages(for marker: Marker?, console: ConsoleTarget) -> [OSCMessage] {
-        if action == .fader {
+        if (marker?.action ?? action) == .fader {
             let level = Int32(max(0, min(100, (marker?.value ?? 100).rounded())))
             return [OSCMessage("\(console.root)/Page\(page)/Fader\(executor)", [.int(level)])]
         }

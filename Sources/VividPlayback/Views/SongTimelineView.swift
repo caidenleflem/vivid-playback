@@ -873,6 +873,11 @@ struct TimelinePanel: View {
     }
 
     private func triggerText(_ m: Marker, lane: TriggerLane) -> String {
+        // A recorded trigger that does something other than its lane says so.
+        if let a = m.action, a != lane.action {
+            if a == .gotoCue { return m.label.hasPrefix("Cue ") ? "Goto \(m.label)" : "Goto · \(m.label)" }
+            return m.label == a.label ? a.label : "\(a.label) · \(m.label)"
+        }
         guard lane.action == .fader, let v = m.value else { return m.label }
         return m.label == "Level" ? "\(Int(v))%" : "\(m.label) · \(Int(v))%"
     }

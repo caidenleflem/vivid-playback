@@ -415,8 +415,17 @@ struct ConnectionsView: View {
                         }
                         Text("Record from the desk").font(.manrope(14, .semibold)).foregroundStyle(Brand.ink).padding(.top, 8)
                         VStack(alignment: .leading, spacing: 6) {
-                            step(1, "Timeline › Record desk (⇧⌘R), then play the song.")
-                            step(2, "Each GO lands on the lane for its executor. A new executor gets a new lane.")
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text("★").font(.manrope(11, .bold)).foregroundStyle(Brand.gold)
+                                    .frame(width: 18, height: 18).background(Circle().fill(Brand.gold.opacity(0.12)))
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Best: the Vivid Recorder plugin. It watches the sequences on the fader page you're on and sends what each one does (Go+, Go-, Goto, Top, On, Off). OSC in must be on here, and the desk's OSC line needs Send on.")
+                                        .font(.manrope(12.5)).foregroundStyle(Brand.steel).fixedSize(horizontal: false, vertical: true)
+                                    Button("Save grandMA3 Plugin…") { model.saveDeskPlugin() }.buttonStyle(QuietButtonStyle())
+                                }
+                            }
+                            step(1, "Timeline › Record desk (⇧⌘R), then play the song. It stays on that song.")
+                            step(2, "Each change lands on the lane for its executor. A new executor gets a new lane.")
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Text("3").font(.manrope(11, .bold).monospacedDigit()).foregroundStyle(Brand.gold)
                                     .frame(width: 18, height: 18).background(Circle().fill(Brand.gold.opacity(0.12)))

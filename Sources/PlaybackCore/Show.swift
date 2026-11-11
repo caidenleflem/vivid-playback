@@ -6,15 +6,20 @@ public struct Marker: Codable, Hashable, Identifiable, Sendable {
     public var label: String
     /// The executor lane this is a trigger on; nil for a plain marker.
     public var laneID: UUID?
-    /// For fader lanes: the level to set, 0–100.
+    /// For fader lanes: the level to set, 0–100. For Goto: the cue number.
     public var value: Double?
+    /// What this trigger does, when it isn't its lane's action (recorded from the desk: the
+    /// sequence went back, or jumped to a cue). Nil does what the lane does.
+    public var action: LaneAction?
 
-    public init(id: UUID = UUID(), time: Timecode, label: String, laneID: UUID? = nil, value: Double? = nil) {
+    public init(id: UUID = UUID(), time: Timecode, label: String, laneID: UUID? = nil, value: Double? = nil,
+                action: LaneAction? = nil) {
         self.id = id
         self.time = time
         self.label = label
         self.laneID = laneID
         self.value = value
+        self.action = action
     }
 }
 
