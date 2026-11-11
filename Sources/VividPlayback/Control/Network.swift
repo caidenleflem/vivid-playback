@@ -53,13 +53,19 @@ final class UDPSocket: @unchecked Sendable {
         if source == nil { close(fd) }
     }
 
+    /// Why the last send didn't leave this Mac, in plain words (nil when it went).
+    private(set) var lastError: String?
+
     @discardableResult
     func send(_ bytes: [UInt8], to host: String, port: UInt16) -> Bool {
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else { return false }
+        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else {
+            lastError = "\(host.isEmpty ? "No address" : host) isn't an IP address."
+            return false
+        }
         let sent = bytes.withUnsafeBytes { buf in
             withUnsafePointer(to: &addr) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -67,7 +73,27 @@ final class UDPSocket: @unchecked Sendable {
                 }
             }
         }
-        return sent == bytes.count
+        if sent == bytes.count {
+            lastError = nil
+            return true
+        }
+        lastError = Self.explain(errno, host: host)
+        return false
+    }
+
+    /// What a send error means for Caiden.
+    static func explain(_ code: Int32, host: String) -> String {
+        let system = String(cString: strerror(code))
+        switch code {
+        case EPERM, EACCES:
+            return "macOS blocked it (\(system)). Allow Vivid Playback in System Settings › Privacy & Security › Local Network, and in the firewall."
+        case EHOSTUNREACH, ENETUNREACH:
+            return "No way to reach \(host) (\(system)). Check the network port and the address. On newer macOS, also allow Vivid Playback in Privacy & Security › Local Network."
+        case EADDRNOTAVAIL:
+            return "The chosen network port has no address right now (\(system))."
+        default:
+            return "Couldn't send to \(host): \(system)."
+        }
     }
 
     /// Calls `handler` with each datagram and the sender's address, on `queue`.

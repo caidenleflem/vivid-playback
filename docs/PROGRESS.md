@@ -656,3 +656,13 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
     timeline.
   - The lane glow and trigger bloom checked every trigger against every lane 60 times a second;
     now one pass over the triggers.
+
+## 2026-11-11: OSC out stopped (being looked at)
+
+- Caiden: the app receives OSC but doesn't seem to send any more. Lead suspect: macOS Local
+  Network privacy. Each build on his Mac is signed differently, so macOS can treat it as a new
+  app and block its sends to the show network until allowed again. Not confirmed.
+- A failed send now says why, from the system, in plain words: under Consoles on Connections
+  (and in the pill's tooltip), e.g. "macOS blocked it … allow Vivid Playback in Privacy &
+  Security › Local Network", "No way to reach 10.0.0.69", "The network port picked for grandMA3
+  isn't connected", "… isn't an IP address".

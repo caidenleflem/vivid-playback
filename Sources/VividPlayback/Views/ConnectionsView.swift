@@ -395,8 +395,18 @@ struct ConnectionsView: View {
                     .foregroundStyle(Brand.steel)
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(Capsule().fill(.white.opacity(0.06)))
-                    .help(last.ok ? "Sent." : "Couldn't send. Check the address, the network, and Local Network access in System Settings › Privacy & Security.")
+                    .help(last.text)
                 }
+                }
+            }
+            // When a send fails, the reason in full (the system's own, in plain words).
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                if let last = control.lastTrigger, !last.ok, Date().timeIntervalSince(last.at) < 120 {
+                    HStack(alignment: .top, spacing: 8) {
+                        StatusDot(color: Brand.warn).padding(.top, 4)
+                        Text(last.text).font(.manrope(12.5)).foregroundStyle(Brand.warn)
+                            .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    }
                 }
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], spacing: 16) {

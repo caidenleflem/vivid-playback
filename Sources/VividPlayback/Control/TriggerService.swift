@@ -36,10 +36,20 @@ final class TriggerService: @unchecked Sendable {
     /// Sends one message to a console; drops a port's socket that failed so the next send makes
     /// a fresh one (an adapter unplugged and plugged back in).
     private func send(_ bytes: [UInt8], to console: ConsoleTarget) -> Bool {
-        let ok = socket(for: console)?.send(bytes, to: console.host, port: console.port) == true
-        if !ok { sockets[console.networkPort ?? ""] = nil }
+        guard let s = socket(for: console) else {
+            lastError = "The network port picked for \(console.name) (\(console.networkPort ?? "?")) isn't connected."
+            return false
+        }
+        let ok = s.send(bytes, to: console.host, port: console.port)
+        if !ok {
+            lastError = s.lastError
+            sockets[console.networkPort ?? ""] = nil
+        }
         return ok
     }
+
+    /// Why the last send failed (queue only).
+    private var lastError: String?
     /// Called on the main queue with each fired trigger and its lane.
     var onFire: ((UUID, UUID) -> Void)?
     /// Called on the main queue after each send: what went where, and whether it left this Mac.
@@ -121,13 +131,15 @@ final class TriggerService: @unchecked Sendable {
     private func send(lane: TriggerLane, marker: Marker?, consoles: [ConsoleTarget]) {
         let targets = lane.targets(in: consoles)
         var ok = !targets.isEmpty
+        lastError = nil
         for console in targets {
             for message in lane.messages(for: marker, console: console) {
                 if !send(message.encoded(), to: console) { ok = false }
             }
         }
         let what = lane.commandLine(for: marker) ?? "Fader \(lane.page).\(lane.executor) at \(Int((marker?.value ?? 100).rounded()))%"
-        let text = targets.isEmpty ? "\(what) · no console to send to" : "\(what) → \(targets.map(\.name).joined(separator: ", "))"
+        var text = targets.isEmpty ? "\(what) · no console to send to" : "\(what) → \(targets.map(\.name).joined(separator: ", "))"
+        if !ok, let why = lastError { text += " · \(why)" }
         let cb = onSend
         DispatchQueue.main.async { cb?(text, ok) }
     }
