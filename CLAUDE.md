@@ -22,5 +22,6 @@ Read `docs/PLAN.md` (the approved plan), then `docs/PROGRESS.md` (what's done an
 - Voice: warm and short. Plain words a lighting tech would use.
 - No ETC Eos work (Caiden's call).
 - Build the installer with `./scripts/make-dmg.sh`. Log each session in `docs/PROGRESS.md`.
-- Always merge to `main` after pushing (Caiden's call), so GitHub builds the installer. Then check
-  the build passed.
+- Always merge to `main` after pushing (Caiden's call), so GitHub builds the installer. Then watch
+  the build closely (poll every ~15 s in the background, not a timer minutes away) and tell Caiden
+  the moment it's published.
