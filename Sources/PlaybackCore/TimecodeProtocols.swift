@@ -155,6 +155,14 @@ public struct OSCMessage: Equatable, Sendable {
         self.arguments = arguments
     }
 
+    /// The command after "/vivid/" in the address, lowercased, wherever "vivid" sits: a desk's
+    /// OSC line can put its own prefix in front ("/gma3/vivid/go" is "go"). Nil for anything else.
+    public var vividCommand: String? {
+        let parts = address.lowercased().split(separator: "/")
+        guard let i = parts.firstIndex(of: "vivid"), i + 1 == parts.count - 1 else { return nil }
+        return String(parts[i + 1])
+    }
+
     public func encoded() -> [UInt8] {
         func padded(_ s: String) -> [UInt8] {
             var b = Array(s.utf8) + [0]
@@ -226,11 +234,10 @@ public enum RemoteCommand: Equatable, Sendable {
 
     /// Reads `/vivid/<command> [argument]`. A trigger whose value is 0 (a button released) is ignored.
     public static func from(_ m: OSCMessage) -> RemoteCommand? {
-        let parts = m.address.lowercased().split(separator: "/")
-        guard parts.count == 2, parts[0] == "vivid" else { return nil }
+        guard let command = m.vividCommand else { return nil }
         let first = m.arguments.first
         let released = first?.number == 0 && first.map { if case .string = $0 { return false } else { return true } } == true
-        switch parts[1] {
+        switch command {
         case "go", "play": return released ? nil : .play
         case "stop", "pause": return released ? nil : .stop
         case "toggle": return released ? nil : .toggle

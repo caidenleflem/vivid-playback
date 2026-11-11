@@ -139,6 +139,19 @@ final class ControlCenter: ObservableObject {
     @Published private(set) var midiDestinations: [MIDIEndpoint] = []
     @Published private(set) var inputDevices: [AudioDevice] = []
     @Published private(set) var oscStatus = ""
+    /// The last OSC messages that arrived, newest first, and what became of them.
+    @Published private(set) var oscHeard: [OSCHeard] = []
+    struct OSCHeard: Identifiable {
+        let id = UUID()
+        let text: String
+        let from: String
+        let meaning: String?
+        let at: Date
+    }
+    private func heard(_ text: String, from: String, meaning: String?) {
+        oscHeard.insert(OSCHeard(text: text, from: from, meaning: meaning, at: Date()), at: 0)
+        if oscHeard.count > 8 { oscHeard.removeLast(oscHeard.count - 8) }
+    }
     @Published private(set) var lastRemote: (text: String, at: Date)?
     @Published var learning: RemoteAction?
     /// Incoming timecode while following, and when it last arrived.
@@ -277,11 +290,26 @@ final class ControlCenter: ObservableObject {
         socket.listen(on: netQueue) { [weak self] data, from in
             let messages = OSCMessage.parse(data)
             Task { @MainActor in
+                guard let self else { return }
+                if messages.isEmpty { self.heard("\(data.count) bytes that aren't OSC", from: from, meaning: nil) }
                 for m in messages {
-                    if let event = DeskSequenceEvent.from(m) { self?.onDeskSequence?(event); continue }
-                    if let go = DeskGo.from(m) { self?.onDeskGo?(go); continue }
-                    guard let cmd = RemoteCommand.from(m) else { continue }
-                    self?.run(cmd, from: "OSC \(m.address) from \(from)")
+                    let text = ([m.address] + m.arguments.map(\.text)).joined(separator: " ")
+                    if let event = DeskSequenceEvent.from(m) {
+                        self.heard(text, from: from, meaning: "desk: \(event.page).\(event.executor) \(event.action.label)")
+                        self.onDeskSequence?(event)
+                        continue
+                    }
+                    if let go = DeskGo.from(m) {
+                        self.heard(text, from: from, meaning: "desk GO \(go.label)")
+                        self.onDeskGo?(go)
+                        continue
+                    }
+                    guard let cmd = RemoteCommand.from(m) else {
+                        self.heard(text, from: from, meaning: nil)
+                        continue
+                    }
+                    self.heard(text, from: from, meaning: "\(cmd)")
+                    self.run(cmd, from: "OSC \(m.address) from \(from)")
                 }
             }
         }

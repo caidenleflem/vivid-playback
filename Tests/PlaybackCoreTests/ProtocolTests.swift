@@ -165,3 +165,16 @@ final class MIDIBytesTests: XCTestCase {
         XCTAssertEqual(MIDITrigger(kind: .note, channel: 1, number: 60).displayName, "Note C4 · ch 1")
     }
 }
+
+final class OSCPrefixTests: XCTestCase {
+    func testADesksPrefixInFrontIsFine() {
+        XCTAssertEqual(RemoteCommand.from(OSCMessage("/gma3/vivid/go", [.int(1)])), .play)
+        XCTAssertEqual(RemoteCommand.from(OSCMessage("/vivid/stop", [.int(1)])), .stop)
+        XCTAssertEqual(RemoteCommand.from(OSCMessage("/MA/Vivid/Song", [.int(12)])), .song(number: 12))
+        XCTAssertNil(RemoteCommand.from(OSCMessage("/gma3/vivid/go", [.int(0)])), "a release is still ignored")
+        XCTAssertNil(RemoteCommand.from(OSCMessage("/vivid/go/extra", [.int(1)])))
+        XCTAssertNil(RemoteCommand.from(OSCMessage("/gma3/Page1/Fader201", [.int(1)])))
+        XCTAssertEqual(DeskGo.from(OSCMessage("/gma3/vivid/exec", [.string("1.201")]))?.executor, 201)
+        XCTAssertEqual(DeskSequenceEvent.from(OSCMessage("/gma3/vivid/seq", ["3.201", "on", "2", "1", "0", "on", "-"].map { .string($0) }))?.action, .goPlus)
+    }
+}

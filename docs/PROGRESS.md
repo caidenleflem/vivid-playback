@@ -613,3 +613,14 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   in under the old one still running, and opening it brought back the old window (Caiden saw no
   plugin button after a good build). Both scripts now wait for it to quit, and stop with a note if
   it won't.
+
+## 2026-11-11: OSC in from the desk
+
+- Caiden: OSC from the desk isn't arriving properly. Likely cause: a desk OSC line with a prefix
+  (the setup steps say gma3) puts it in front of what SendOSC sends ("/gma3/vivid/go"), and the
+  app only took addresses starting "/vivid/". Remote commands, desk GOs and the plugin's
+  /vivid/seq now accept "/vivid/<command>" behind any prefix (core `OSCMessage.vividCommand`,
+  tested; 164 tests pass).
+- The OSC card has a **Heard** list: the last 8 messages that arrived, who sent them, and what
+  the app made of each ("not a Vivid command" in amber), so a wrong address, port or network
+  shows at once.

@@ -25,8 +25,7 @@ public struct DeskGo: Equatable, Sendable {
     /// optional cue after: `/vivid/exec "1.201" "4"`. A 0 (a button released) is ignored.
     /// On a grandMA3: `SendOSC 1 "/vivid/exec,s,1.201"` in a macro or a cue's command.
     public static func from(_ m: OSCMessage) -> DeskGo? {
-        let parts = m.address.lowercased().split(separator: "/")
-        guard parts.count == 2, parts[0] == "vivid", parts[1] == "exec" else { return nil }
+        guard m.vividCommand == "exec" else { return nil }
         let args = m.arguments
         guard let first = args.first else { return nil }
         if case .string(let text) = first {
@@ -137,8 +136,7 @@ public struct DeskSequenceEvent: Equatable, Sendable {
     }
 
     public static func from(_ m: OSCMessage) -> DeskSequenceEvent? {
-        let parts = m.address.lowercased().split(separator: "/")
-        guard parts.count == 2, parts[0] == "vivid", parts[1] == "seq", m.arguments.count >= 6 else { return nil }
+        guard m.vividCommand == "seq", m.arguments.count >= 6 else { return nil }
         let a = m.arguments.map { $0.text.trimmingCharacters(in: .whitespaces) }
         guard let ref = DeskGo.executorRef(a[0]), let page = ref.page else { return nil }
         func on(_ s: String) -> Bool { ["on", "1", "true"].contains(s.lowercased()) }
