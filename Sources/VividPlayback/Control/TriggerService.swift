@@ -50,6 +50,16 @@ final class TriggerService: @unchecked Sendable {
 
     /// Why the last send failed (queue only).
     private var lastError: String?
+
+    /// What was fired on the desk, so the desk moving because of it isn't recorded as a press.
+    private var echo = DeskEcho()
+    private let echoLock = NSLock()
+
+    /// The desk moving this executor at `time` (CACurrentMediaTime) is Vivid's own trigger coming back.
+    func isEcho(page: Int, executor: Int, at time: Double) -> Bool {
+        echoLock.lock(); defer { echoLock.unlock() }
+        return echo.isEcho(page: page, executor: executor, at: time)
+    }
     /// Called on the main queue with each fired trigger and its lane.
     var onFire: ((UUID, UUID) -> Void)?
     /// Called on the main queue after each send: what went where, and whether it left this Mac.
@@ -132,6 +142,9 @@ final class TriggerService: @unchecked Sendable {
         let targets = lane.targets(in: consoles)
         var ok = !targets.isEmpty
         lastError = nil
+        if !targets.isEmpty {
+            echoLock.lock(); echo.fired(page: lane.page, executor: lane.executor, at: CACurrentMediaTime()); echoLock.unlock()
+        }
         for console in targets {
             for message in lane.messages(for: marker, console: console) {
                 if !send(message.encoded(), to: console) { ok = false }

@@ -147,3 +147,16 @@ final class DeskClockTests: XCTestCase {
         XCTAssertNil(old.deskTime, "an older plugin still works")
     }
 }
+
+final class DeskEchoTests: XCTestCase {
+    func testVividsOwnTriggersArentRecordedBack() {
+        var echo = DeskEcho()
+        echo.fired(page: 3, executor: 201, at: 100)
+        XCTAssertTrue(echo.isEcho(page: 3, executor: 201, at: 100.02), "the desk moving just after Vivid fired it")
+        XCTAssertTrue(echo.isEcho(page: 3, executor: 201, at: 100.7))
+        XCTAssertFalse(echo.isEcho(page: 3, executor: 201, at: 101.0), "a press a second later is a press")
+        XCTAssertFalse(echo.isEcho(page: 3, executor: 202, at: 100.02), "another executor is a press")
+        XCTAssertFalse(echo.isEcho(page: 1, executor: 201, at: 100.02), "same executor on another page is a press")
+        XCTAssertFalse(echo.isEcho(page: 3, executor: 201, at: 99.0), "before Vivid fired it")
+    }
+}

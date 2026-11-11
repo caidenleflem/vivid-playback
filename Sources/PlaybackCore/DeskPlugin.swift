@@ -181,17 +181,35 @@ public enum DeskPlugin {
       return out
     end
 
+    -- How a cue is triggered ("Go", "Follow", "Time", "Sound", "BPM", "Timecode"…), from the cue
+    -- or its first part. "" when the desk doesn't say.
+    local function trigOf(cue)
+      for _, h in ipairs({ cue, children(cue)[1] }) do
+        for _, key in ipairs({ "Trig", "TrigType", "Trigger" }) do
+          local v = prop(h, key)
+          if v ~= nil and tostring(v) ~= "" then return tostring(v) end
+        end
+      end
+      return ""
+    end
+
+    -- A cue that runs by itself (Follow, Time, Sound, BPM, Timecode) isn't a button press.
+    local function firesItself(cue)
+      local t = string.lower(trigOf(cue))
+      return t:find("follow") or t:find("time") or t:find("sound") or t:find("bpm") or t:find("timecode")
+    end
+
     -- Where a sequence is: on or off, the cue number, its place in the list (0 = first), its name.
     local function where(seq)
       local ok, current = pcall(function() return seq:CurrentChild() end)
-      if not ok or current == nil then return false, nil, -1, nil end
+      if not ok or current == nil then return false, nil, -1, nil, false end
       local number = cueNumber(current)
-      if number == nil or number <= 0 then return false, nil, -1, nil end
+      if number == nil or number <= 0 then return false, nil, -1, nil, false end
       local index = -1
       for i, c in ipairs(realCues(seq)) do
         if cueNumber(c) == number then index = i - 1 break end
       end
-      return true, number, index, prop(current, "Name")
+      return true, number, index, prop(current, "Name"), firesItself(current)
     end
 
     -- The executors with a sequence on the fader page you're on.
@@ -226,8 +244,11 @@ public enum DeskPlugin {
     local function test()
       Printf("Vivid Recorder sees, on this page:")
       for _, e in ipairs(onThisPage()) do
-        local on, number, index, name = where(e.seq)
-        Printf("  %s  %s  cue %s (place %d)  %s", e.key, on and "on" or "off", cueText(number), index, tostring(name or ""))
+        local on, number, index, name, auto = where(e.seq)
+        local current = nil
+        pcall(function() current = e.seq:CurrentChild() end)
+        Printf("  %s  %s  cue %s (place %d)  %s  trig: %s%s", e.key, on and "on" or "off", cueText(number), index,
+          tostring(name or ""), current and trigOf(current) or "-", auto and "  (runs itself: not recorded)" or "")
       end
       Printf("It would send them on OSC line %d. Desk clock reads %s.", OSC_LINE, tostring(deskTime()))
     end
@@ -246,7 +267,7 @@ public enum DeskPlugin {
         -- One stamp per look: everything that changed since the last look happened just now.
         local stamp = deskTime()
         for _, e in ipairs(onThisPage()) do
-          local on, number, index, name = where(e.seq)
+          local on, number, index, name, auto = where(e.seq)
           local now = { on = on, number = number, index = index, name = name }
           local before = last[e.key]
           -- Off keeps the cue it was on, so turning it back on there reads as On.
@@ -254,7 +275,8 @@ public enum DeskPlugin {
             now.number, now.index, now.name = before.number, before.index, before.name
           end
           -- The first look at an executor (or a page) only learns where it is.
-          if before ~= nil and (before.on ~= now.on or before.number ~= now.number) then
+          -- Only presses: a cue that ran by itself (Follow, Time…) moves on without being sent.
+          if before ~= nil and (before.on ~= now.on or before.number ~= now.number) and not (on and auto) then
             send(e.key, now, before, stamp)
           end
           last[e.key] = now

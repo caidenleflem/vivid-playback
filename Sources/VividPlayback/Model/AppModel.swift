@@ -1019,6 +1019,11 @@ final class AppModel: ObservableObject {
         // arrived), then where the music was at that moment.
         var when = deskClock.time(desk: e.deskTime, arrivedAt: arrivedAt)
         if e.deskTime != nil { when -= DeskSequenceEvent.detectionLag }
+        // Vivid's own trigger making the desk move isn't a press.
+        if control.triggers.isEcho(page: e.page, executor: e.executor, at: when) {
+            lastDeskGo = ("\(from) · Vivid fired that, not recorded", Date())
+            return
+        }
         deskQueue.append((e, transport.position(at: when)))
         guard !deskFlushQueued else { return }
         deskFlushQueued = true
@@ -1173,6 +1178,10 @@ final class AppModel: ObservableObject {
         guard transport.isPlaying else { lastDeskGo = ("\(from) · play the song to record it", Date()); return }
         // Where the music was when the GO arrived (the position you hear), not when the screen got to it.
         let seconds = transport.position(at: arrivedAt)
+        if let page = go.page, control.triggers.isEcho(page: page, executor: go.executor, at: arrivedAt) {
+            lastDeskGo = ("\(from) · Vivid fired that, not recorded", Date())
+            return
+        }
         var lane = DeskRecorder.lane(for: go, in: lanes)
         if lane == nil {
             // An executor with no lane yet gets one.

@@ -260,3 +260,24 @@ public struct DeskClock: Sendable {
         return min(arrival, deskTime + best)
     }
 }
+
+/// What Vivid itself just fired on the desk, so the desk moving because of it isn't recorded as
+/// a press. Times are this Mac's clock (seconds).
+public struct DeskEcho: Sendable {
+    /// How long after Vivid fires an executor its sequence moving is taken as the echo.
+    public var window: Double = 0.75
+    private var fired: [String: Double] = [:]
+
+    public init() {}
+
+    public mutating func fired(page: Int, executor: Int, at time: Double) {
+        fired["\(page).\(executor)"] = time
+        if fired.count > 512 { fired = fired.filter { $0.value > time - 10 } }
+    }
+
+    /// The desk moving this executor at `time` is Vivid's own trigger coming back.
+    public func isEcho(page: Int, executor: Int, at time: Double) -> Bool {
+        guard let t = fired["\(page).\(executor)"] else { return false }
+        return time >= t - 0.05 && time <= t + window
+    }
+}

@@ -691,3 +691,20 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - **Re-save the plugins** (Save grandMA3 Plugins…) to get the stamped recorder; the old one still
   works, timed on arrival. **Needs a check on the desk:** `Plugin "Vivid Recorder" "test"` prints
   the desk clock; it should read with decimals.
+
+## 2026-11-11: record presses only
+
+- Caiden: recording must only take real button presses, not every time a sequence moves. The
+  plugin can't see the button itself, so everything that isn't a press is filtered out:
+  - **Vivid's own triggers coming back:** the trigger service remembers what it fired; the desk
+    moving that page.executor within 0.75 s after is the echo and isn't recorded (core
+    `DeskEcho`, tested). Applies to plugin changes and OSC/MSC GOs. Shown as "Vivid fired that,
+    not recorded".
+  - **Cues that run by themselves:** the plugin skips a change into a cue whose trigger is
+    Follow, Time, Sound, BPM or Timecode (read from the cue's Trig, or its first part's). The
+    next real press is still read from where that cue left the sequence. `Plugin "Vivid Recorder"
+    "test"` shows each current cue's trig.
+  - **The desk's own timecode show** moving sequences can't be told apart from a press: switch it
+    off (or its timecode input) while recording.
+- 172 tests pass; the plugin was run against a mock desk with a Follow cue.
+- **Needs a check on the desk:** the cue's trig reads (the "test" line shows it).
