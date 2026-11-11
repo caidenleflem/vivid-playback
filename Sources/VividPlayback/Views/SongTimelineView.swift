@@ -853,7 +853,9 @@ struct TimelinePanel: View {
         let (target, reachable) = targetText(lane)
         let hasName = !lane.name.trimmingCharacters(in: .whitespaces).isEmpty
         let detail = hasName ? "\(lane.page).\(lane.executor) · \(lane.action == .custom ? "Custom" : lane.action.label) · \(target)" : target
-        return Button { model.selectedLaneID = lane.id } label: {
+        let showArm = model.recordingFromDesk || !model.armedExecutors.isEmpty
+        let armed = model.isArmed(lane)
+        let main = Button { model.selectedLaneID = lane.id } label: {
             HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 1.5).fill(color).frame(width: 3, height: max(10, height - 12))
                 VStack(alignment: .leading, spacing: 1) {
@@ -891,10 +893,31 @@ struct TimelinePanel: View {
             Button("Edit Lane…") { model.laneEdit = lane }.disabled(model.locked)
             Button("Fire Now") { model.fireLane(lane) }
             Divider()
+            Button(armed ? "Disarm for Recording" : "Arm for Recording") { model.toggleArm(lane) }
+            Button("Arm All Lanes") { model.armAll(true) }
+            Button("Disarm All Lanes") { model.armAll(false) }.disabled(model.armedExecutors.isEmpty)
+            Divider()
             Button(lane.muted ? "Unmute" : "Mute") { model.toggleMute(lane) }.disabled(model.locked)
             Button("Delete Lane") { model.deleteLane(lane) }.disabled(model.locked)
         }
         .help("\(lane.commandLine() ?? "Fader \(lane.page).\(lane.executor)") → \(target). Click to choose this lane for C; double-click to edit.")
+        return HStack(spacing: 2) {
+            main
+            if showArm {
+                // Record-arm: while any lane is armed, only armed executors record from the desk.
+                Button { model.toggleArm(lane) } label: {
+                    Circle()
+                        .fill(armed ? Color(hex: 0xE5675A) : Color.clear)
+                        .overlay(Circle().strokeBorder(Color(hex: 0xE5675A).opacity(armed ? 1 : 0.55), lineWidth: 1.2))
+                        .frame(width: 11, height: 11)
+                        .frame(width: 20, height: max(16, height))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(armed ? "Armed: hits on \(lane.page).\(lane.executor) record. Click to disarm."
+                            : "Arm \(lane.page).\(lane.executor) for recording. While any lane is armed, only armed ones record, so the desk's timecode show can run.")
+            }
+        }
     }
 
     private func triggerText(_ m: Marker, lane: TriggerLane) -> String {

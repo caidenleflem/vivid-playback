@@ -1019,6 +1019,10 @@ final class AppModel: ObservableObject {
         // arrived), then where the music was at that moment.
         var when = deskClock.time(desk: e.deskTime, arrivedAt: arrivedAt)
         if e.deskTime != nil { when -= DeskSequenceEvent.detectionLag }
+        guard armedForRecording(page: e.page, executor: e.executor) else {
+            lastDeskGo = ("\(from) · not armed", Date())
+            return
+        }
         // Vivid's own trigger making the desk move isn't a press.
         if control.triggers.isEcho(page: e.page, executor: e.executor, at: when) {
             lastDeskGo = ("\(from) · Vivid fired that, not recorded", Date())
@@ -1032,6 +1036,29 @@ final class AppModel: ObservableObject {
     }
 
     private var deskClock = DeskClock()
+
+    /// Executors armed for recording ("3.201"). While any are armed, only they record from the
+    /// desk, so a timecode show running on the desk can move everything else. None armed:
+    /// everything records.
+    @Published var armedExecutors: Set<String> = []
+
+    func isArmed(_ lane: TriggerLane) -> Bool { armedExecutors.contains("\(lane.page).\(lane.executor)") }
+
+    func toggleArm(_ lane: TriggerLane) {
+        let key = "\(lane.page).\(lane.executor)"
+        if armedExecutors.contains(key) { armedExecutors.remove(key) } else { armedExecutors.insert(key) }
+    }
+
+    func armAll(_ on: Bool) {
+        armedExecutors = on ? Set(lanes.map { "\($0.page).\($0.executor)" }) : []
+    }
+
+    /// Whether a hit on this executor records, given what's armed.
+    private func armedForRecording(page: Int?, executor: Int) -> Bool {
+        guard !armedExecutors.isEmpty else { return true }
+        if let page { return armedExecutors.contains("\(page).\(executor)") }
+        return armedExecutors.contains { $0.hasSuffix(".\(executor)") }
+    }
     private var deskQueue: [(event: DeskSequenceEvent, seconds: Double)] = []
     private var deskFlushQueued = false
 
@@ -1178,6 +1205,10 @@ final class AppModel: ObservableObject {
         guard transport.isPlaying else { lastDeskGo = ("\(from) · play the song to record it", Date()); return }
         // Where the music was when the GO arrived (the position you hear), not when the screen got to it.
         let seconds = transport.position(at: arrivedAt)
+        guard armedForRecording(page: go.page, executor: go.executor) else {
+            lastDeskGo = ("\(from) · not armed", Date())
+            return
+        }
         if let page = go.page, control.triggers.isEcho(page: page, executor: go.executor, at: arrivedAt) {
             lastDeskGo = ("\(from) · Vivid fired that, not recorded", Date())
             return

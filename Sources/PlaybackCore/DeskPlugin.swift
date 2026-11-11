@@ -241,6 +241,47 @@ public enum DeskPlugin {
         before.index, before.on and "on" or "off", clean(now.name), stamp))
     end
 
+    -- Lists the desk's timecode shows (their tracks and first events) so Vivid can learn how they
+    -- look on this desk, to tell a timecode show's own moves from a press.
+    local function describe(v)
+      if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then return tostring(v) end
+      return className(v) .. ":" .. tostring(prop(v, "Name") or "")
+    end
+
+    local function dumpTimecodes()
+      local dp = nil
+      pcall(function() dp = DataPool() end)
+      if dp == nil then Printf("Timecode shows: DataPool() can't be read.") return end
+      local pool = nil
+      for _, c in ipairs(children(dp)) do
+        local n = tostring(prop(c, "Name") or "")
+        if className(c):find("Timecode") or n:find("Timecode") then pool = c break end
+      end
+      if pool == nil then Printf("Timecode shows: no timecode pool found in the data pool.") return end
+      Printf("Timecode shows (%s):", describe(pool))
+      local lines = 0
+      local function walk(h, depth)
+        if lines >= 60 then return end
+        local bits = {}
+        for _, k in ipairs({ "No", "Name", "Time", "Token", "Cmd", "Object", "Target", "Status", "Playing", "CurrentTime", "Duration", "TCSlot" }) do
+          local v = prop(h, k)
+          if v ~= nil and tostring(v) ~= "" then bits[#bits + 1] = k .. "=" .. describe(v) end
+        end
+        Printf("%s%s  %s", string.rep("  ", depth + 1), className(h), table.concat(bits, " "))
+        lines = lines + 1
+        if depth < 6 then
+          for i, c in ipairs(children(h)) do
+            if i > 4 then break end
+            walk(c, depth + 1)
+          end
+        end
+      end
+      for i, tc in ipairs(children(pool)) do
+        if i > 2 then break end
+        walk(tc, 0)
+      end
+    end
+
     local function test()
       Printf("Vivid Recorder sees, on this page:")
       for _, e in ipairs(onThisPage()) do
@@ -251,6 +292,7 @@ public enum DeskPlugin {
           tostring(name or ""), current and trigOf(current) or "-", auto and "  (runs itself: not recorded)" or "")
       end
       Printf("It would send them on OSC line %d. Desk clock reads %s.", OSC_LINE, tostring(deskTime()))
+      dumpTimecodes()
     end
 
     local function Main(display, argument)

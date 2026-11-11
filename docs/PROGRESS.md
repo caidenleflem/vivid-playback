@@ -708,3 +708,16 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
     off (or its timecode input) while recording.
 - 172 tests pass; the plugin was run against a mock desk with a Follow cue.
 - **Needs a check on the desk:** the cue's trig reads (the "test" line shows it).
+
+## 2026-11-11: record-arm, with the desk's timecode show running
+
+- Caiden needs the desk's timecode show running while recording, and the plugin can't tell its
+  moves from a press. **Record-arm** (like a DAW): while recording (or once anything is armed),
+  each lane shows a record dot; right-click a lane for Arm / Arm All / Disarm All. While any
+  executor is armed, only armed executors record (plugin changes, OSC and MSC GOs); others say
+  "not armed". Nothing armed records everything, as before. Arming is per executor (page.exec),
+  for this session.
+- Toward filtering the timecode show's own moves on armed executors: the plugin's test mode now
+  also lists the desk's timecode shows (tracks, targets, first events with their times and
+  tokens), to learn how 2.3.2.0 stores them. Next: read that and skip changes that line up with
+  the show's own events.
