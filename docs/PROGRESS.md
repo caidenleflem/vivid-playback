@@ -532,3 +532,11 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   wording), `ConsoleTarget.networkPort` (older settings load on Automatic). 143 tests pass.
 - **Needs a check on the Mac:** Art-Net and OSC leave on the chosen port with Wi-Fi on; listening
   on a chosen port hears the desk.
+
+## 2026-11-11: grandMA3 executors addressed by page
+
+- Caiden: MA3 executors are addressed "Go+ Page 3.201", not "Exec 3.201". Go+, Go-, Top, On and
+  Off triggers now send `<action> Page <page>.<exec>`, Import labels to console defaults to
+  `Label Page {page}.{exec} "{name}"` (a Mac still on the old built-in default moves to the new
+  one; a template Caiden wrote is left alone), and the examples on screen match. Custom commands
+  are his own text and aren't changed.

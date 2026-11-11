@@ -7,17 +7,17 @@ final class TriggerTests: XCTestCase {
     func testCommandsForEachAction() {
         var lane = TriggerLane(page: 1, executor: 201)
         XCTAssertEqual(lane.title, "1.201 · Go+")
-        XCTAssertEqual(lane.messages(for: nil, console: ma3), [OSCMessage("/gma3/cmd", [.string("Go+ Exec 1.201")])])
-        lane.action = .goMinus;  XCTAssertEqual(lane.commandLine(), "Go- Exec 1.201")
-        lane.action = .top;      XCTAssertEqual(lane.commandLine(), "Top Exec 1.201")
-        lane.action = .off;      XCTAssertEqual(lane.commandLine(), "Off Exec 1.201")
+        XCTAssertEqual(lane.messages(for: nil, console: ma3), [OSCMessage("/gma3/cmd", [.string("Go+ Page 1.201")])])
+        lane.action = .goMinus;  XCTAssertEqual(lane.commandLine(), "Go- Page 1.201")
+        lane.action = .top;      XCTAssertEqual(lane.commandLine(), "Top Page 1.201")
+        lane.action = .off;      XCTAssertEqual(lane.commandLine(), "Off Page 1.201")
         lane.action = .fader
         let m = Marker(time: Timecode(frameCount: 0, rate: .fps30), label: "Half", value: 50)
         XCTAssertEqual(lane.messages(for: m, console: ma3), [OSCMessage("/gma3/Page1/Fader201", [.int(50)])])
         lane.action = .custom
-        lane.command = "Goto Cue {value} Exec {page}.{exec} \"{label}\""
+        lane.command = "Goto Cue {value} Page {page}.{exec} \"{label}\""
         let cue = Marker(time: Timecode(frameCount: 0, rate: .fps30), label: "Drop", value: 7)
-        XCTAssertEqual(lane.commandLine(for: cue), "Goto Cue 7 Exec 1.201 \"Drop\"")
+        XCTAssertEqual(lane.commandLine(for: cue), "Goto Cue 7 Page 1.201 \"Drop\"")
         lane.command = "  "
         XCTAssertTrue(lane.messages(for: cue, console: ma3).isEmpty, "an empty command sends nothing")
     }
@@ -181,7 +181,7 @@ final class ExecutorLabelTests: XCTestCase {
 
     func testCommandKeepsTheCommandLineIntact() {
         var label = ExecutorLabel(page: 1, executor: 201, names: ["x"], name: "Big \"look\" ", consoleIDs: [], laneCount: 1)
-        XCTAssertEqual(label.command(template: ExecutorLabel.defaultTemplate), "Label Exec 1.201 \"Big 'look'\"")
+        XCTAssertEqual(label.command(template: ExecutorLabel.defaultTemplate), "Label Page 1.201 \"Big 'look'\"")
         label.name = "Verse"
         XCTAssertEqual(label.command(template: "Label Page {page}.{exec} \"{name}\""), "Label Page 1.201 \"Verse\"")
     }

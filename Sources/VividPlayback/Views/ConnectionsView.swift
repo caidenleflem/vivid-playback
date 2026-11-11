@@ -497,7 +497,7 @@ struct ConnectionsView: View {
                 NetworkPortPicker(selection: c.networkPort, target: c.wrappedValue.host.isEmpty ? nil : c.wrappedValue.host)
                 HStack(spacing: 6) {
                     Text("Sends").font(.manrope(11.5, .semibold)).foregroundStyle(Brand.graphite)
-                    Text("\(c.wrappedValue.prefix.isEmpty ? "" : "/" + c.wrappedValue.prefix.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")))/cmd \"Go+ Exec 1.201\"")
+                    Text("\(c.wrappedValue.prefix.isEmpty ? "" : "/" + c.wrappedValue.prefix.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")))/cmd \"Go+ Page 1.201\"")
                         .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Brand.champagne).lineLimit(1)
                     Spacer()
                     Button {

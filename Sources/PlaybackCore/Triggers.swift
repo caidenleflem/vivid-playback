@@ -114,7 +114,8 @@ public struct TriggerLane: Codable, Hashable, Identifiable, Sendable {
 
     /// The command line this lane sends for a trigger (nil for fader lanes, which send a level).
     public func commandLine(for marker: Marker? = nil) -> String? {
-        let target = "Exec \(page).\(executor)"
+        // grandMA3 addresses an executor by its page: "Go+ Page 3.201".
+        let target = "Page \(page).\(executor)"
         switch action {
         case .goPlus: return "Go+ \(target)"
         case .goMinus: return "Go- \(target)"
@@ -211,7 +212,9 @@ public struct ExecutorLabel: Equatable, Identifiable, Sendable {
             .replacingOccurrences(of: "{name}", with: safe)
     }
 
-    public static let defaultTemplate = "Label Exec {page}.{exec} \"{name}\""
+    public static let defaultTemplate = "Label Page {page}.{exec} \"{name}\""
+    /// The default before executors were addressed by page (settings saved with it move on).
+    public static let oldDefaultTemplate = "Label Exec {page}.{exec} \"{name}\""
 
     /// One label per executor from the lanes of a set of songs. Lanes without a name of their
     /// own are left out (nothing to send). Executors in page/executor order.

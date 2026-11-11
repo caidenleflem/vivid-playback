@@ -491,7 +491,7 @@ struct LaneEditor: View {
                         Text("Each trigger sets the fader to its level. New triggers start at 100%; right-click one to change it.")
                             .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
                     case .custom:
-                        TextField("Go+ Exec {page}.{exec}", text: Binding(get: { lane.command ?? "" }, set: { lane.command = $0 }))
+                        TextField("Go+ Page {page}.{exec}", text: Binding(get: { lane.command ?? "" }, set: { lane.command = $0 }))
                             .textFieldStyle(.roundedBorder).font(.system(size: 13, design: .monospaced))
                         Text("Any command line. {page} and {exec} are this lane's executor, {label} the trigger's name, {value} its value.")
                             .font(.manrope(12)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)

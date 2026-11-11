@@ -54,6 +54,8 @@ struct ControlSettings: Codable, Equatable {
         fireEarlyMs = try c.decodeIfPresent(Double.self, forKey: .fireEarlyMs) ?? d.fireEarlyMs
         keysFire = try c.decodeIfPresent(Bool.self, forKey: .keysFire) ?? d.keysFire
         labelTemplate = try c.decodeIfPresent(String.self, forKey: .labelTemplate) ?? d.labelTemplate
+        // The old built-in default addressed executors the wrong way; a template Caiden wrote stays.
+        if labelTemplate == ExecutorLabel.oldDefaultTemplate { labelTemplate = ExecutorLabel.defaultTemplate }
         mscPort = try c.decodeIfPresent(UInt16.self, forKey: .mscPort) ?? d.mscPort
         artNetOutPort = try c.decodeIfPresent(String.self, forKey: .artNetOutPort)
         oscInPort = try c.decodeIfPresent(String.self, forKey: .oscInPort)
