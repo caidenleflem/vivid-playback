@@ -77,7 +77,7 @@ struct OutputSheet: View {
                         get: { routing.masterChannels.count > 1 ? routing.masterChannels[0] : -(routing.masterChannels.first ?? 1) },
                         set: { tag in model.updateRouting { $0.masterChannels = tag > 0 ? [tag, tag + 1] : [-tag] } })) {
                         ForEach(Array(stride(from: 1, to: channels, by: 2)), id: \.self) { c in
-                            Text("Outputs \(c)–\(c + 1) (stereo)").tag(c)
+                            Text("Outputs \(c)–\(c + 1) (stereo)\(device?.part(for: c).map { device?.isAggregate == true ? " · \($0.part.name)" : "" } ?? "")").tag(c)
                         }
                         ForEach(1...channels, id: \.self) { c in
                             Text("\(device?.outputLabel(c) ?? "Output \(c)") only (mono)").tag(-c)
@@ -124,6 +124,9 @@ struct OutputSheet: View {
                     }
                     .labelsHidden()
                     .frame(width: 340)
+                }
+                if let d = device, d.isAggregate, !split {
+                    aggregateNote(d)
                 }
                 if let d = device, d.isDante, !split {
                     danteCard(d, routing: routing)
@@ -230,6 +233,30 @@ struct OutputSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12).fill(Brand.solid))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Brand.gold.opacity(0.35), lineWidth: 1))
+    }
+
+    /// An aggregate numbers its outputs straight across the interfaces inside it, so outputs 1–2
+    /// are whichever interface is first in Audio MIDI Setup. Say which is which.
+    @ViewBuilder private func aggregateNote(_ d: AudioDevice) -> some View {
+        note("\(d.name) is an aggregate device: \(Self.ranges(of: d)). Make sure the master and timecode outputs are on the interfaces you mean. Or skip the aggregate: choose the master's interface above and the timecode interface below, and the app joins them for you.", warn: false)
+        if d.partsDisagreeOnRate {
+            note("The interfaces in \(d.name) run at different sample rates (\(Self.rates(of: d))). That can leave an aggregate silent. Set them the same in Audio MIDI Setup, or choose the interfaces here instead.", warn: true)
+        }
+    }
+
+    /// "outputs 1–2 are MOTU M4, outputs 3–10 are RME".
+    private static func ranges(of d: AudioDevice) -> String {
+        var first = 1
+        var out: [String] = []
+        for p in d.parts {
+            out.append(p.outputs == 1 ? "output \(first) is \(p.name)" : "outputs \(first)–\(first + p.outputs - 1) are \(p.name)")
+            first += p.outputs
+        }
+        return out.joined(separator: ", ")
+    }
+
+    private static func rates(of d: AudioDevice) -> String {
+        d.parts.map { "\($0.name) \(Int($0.sampleRate)) Hz" }.joined(separator: ", ")
     }
 
     private func note(_ text: String, warn: Bool) -> some View {

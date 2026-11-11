@@ -12,6 +12,29 @@ struct AudioDevice: Identifiable, Hashable {
     var manufacturer: String = ""
     /// Names macOS gives the output channels (Dante devices often carry their channel labels).
     var channelNames: [String] = []
+    /// For an aggregate device: the interfaces inside it, in output order.
+    var parts: [Part] = []
+
+    struct Part: Hashable {
+        let name: String
+        let outputs: Int
+        let sampleRate: Double
+    }
+
+    var isAggregate: Bool { parts.count > 1 }
+
+    /// The interface inside an aggregate that owns `channel` (1-based), and its own number there.
+    func part(for channel: Int) -> (part: Part, local: Int)? {
+        var first = 1
+        for p in parts {
+            if channel >= first && channel < first + p.outputs { return (p, channel - first + 1) }
+            first += p.outputs
+        }
+        return nil
+    }
+
+    /// The inside interfaces don't all run at one sample rate (an aggregate like that can stay silent).
+    var partsDisagreeOnRate: Bool { Set(parts.map(\.sampleRate).filter { $0 > 0 }).count > 1 }
 
     /// Dante Virtual Soundcard, Dante Via, or an interface from Audinate's ecosystem.
     var isDante: Bool {
@@ -19,8 +42,10 @@ struct AudioDevice: Identifiable, Hashable {
         return n.contains("dante") || m.contains("audinate")
     }
 
-    /// "Output 3 · FOH LTC", or just "Output 3" when the channel has no real name.
+    /// "Output 3 · FOH LTC", or just "Output 3" when the channel has no real name. On an
+    /// aggregate: "Output 3 · MOTU M4 out 1", so it's clear which interface it is.
     func outputLabel(_ channel: Int) -> String {
+        if isAggregate, let (p, local) = part(for: channel) { return "Output \(channel) · \(p.name) out \(local)" }
         let i = channel - 1
         guard i >= 0, i < channelNames.count else { return "Output \(channel)" }
         let n = channelNames[i].trimmingCharacters(in: .whitespaces)
@@ -137,7 +162,41 @@ enum AudioDevices {
                            outputChannels: channels,
                            sampleRate: nominalSampleRate(id),
                            manufacturer: string(id, kAudioObjectPropertyManufacturer) ?? "",
-                           channelNames: (1...max(1, channels)).map { channelName(id, $0) ?? "" })
+                           channelNames: (1...max(1, channels)).map { channelName(id, $0) ?? "" },
+                           parts: aggregateParts(id))
+    }
+
+    /// The interfaces inside an aggregate device, in the order its outputs are numbered.
+    private static func aggregateParts(_ id: AudioDeviceID) -> [AudioDevice.Part] {
+        var typeAddr = address(kAudioDevicePropertyTransportType)
+        var type = UInt32(0)
+        var typeSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &typeAddr, 0, nil, &typeSize, &type) == noErr,
+              type == kAudioDeviceTransportTypeAggregate else { return [] }
+        var addr = address(kAudioAggregateDevicePropertyFullSubDeviceList)
+        var value: Unmanaged<CFArray>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFArray>?>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr, let value,
+              let uids = value.takeRetainedValue() as? [String] else { return [] }
+        return uids.compactMap { uid in
+            guard let sub = deviceID(forUID: uid) else { return nil }
+            let outputs = outputChannels(sub)
+            guard outputs > 0 else { return nil }
+            return AudioDevice.Part(name: string(sub, kAudioObjectPropertyName) ?? uid, outputs: outputs,
+                                    sampleRate: nominalSampleRate(sub))
+        }
+    }
+
+    private static func deviceID(forUID uid: String) -> AudioDeviceID? {
+        var addr = address(kAudioHardwarePropertyTranslateUIDToDevice)
+        var cf = uid as CFString
+        var id = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = withUnsafePointer(to: &cf) { p in
+            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr,
+                                       UInt32(MemoryLayout<CFString>.size), p, &size, &id)
+        }
+        return status == noErr && id != 0 ? id : nil
     }
 
     /// Calls `onChange` on the main queue whenever interfaces are plugged in or unplugged.

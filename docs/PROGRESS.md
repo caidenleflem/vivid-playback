@@ -484,3 +484,9 @@ master and for LTC.
 - **Needs a check on the Mac:** both interfaces show up and play; timecode on the second one reads
   on the desk across a full song with no drift; latency between the two (loop the LTC back, or
   compare with the clock). If Core Audio won't join them, the sheet says so and no timecode goes out.
+- Caiden's own aggregate gave no sound. Likely causes, now shown in the app: an aggregate numbers
+  its outputs straight across its interfaces (outputs 1–2 are whichever interface is first in
+  Audio MIDI Setup), and interfaces at different sample rates can leave it silent. Aggregate
+  outputs are now labelled with their interface ("Output 3 · MOTU M4 out 1"), the sheet lists
+  which outputs belong to which interface, and warns when their rates differ.
+- New rule (Caiden's call): always merge to `main` after pushing.
