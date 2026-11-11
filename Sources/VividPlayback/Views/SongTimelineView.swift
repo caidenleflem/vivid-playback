@@ -159,13 +159,7 @@ struct SongTimelineView: View {
                 .font(.manrope(12.5))
             }
             Spacer(minLength: 0)
-            if model.recordingFromDesk {
-                DeskRecordingBadge()
-                    .frame(maxWidth: 360, alignment: .trailing)
-                    .transition(.opacity)
-            }
         }
-        .animation(.vivid(0.3), value: model.recordingFromDesk)
     }
 
     /// "Master  03 Night Drive.wav": click the name to choose or replace the file; right-click to remove it.
@@ -284,7 +278,11 @@ struct TimelinePanel: View {
                 .onAppear { reportTrackFrame(geo, trackWidth: trackWidth) }
                 .onChange(of: geo.frame(in: .global)) { _ in reportTrackFrame(geo, trackWidth: trackWidth) }
             }
-            if plain.isEmpty && lanes.isEmpty {
+            if model.recordingFromDesk && lanes.isEmpty {
+                DeskRecordingLine()
+                    .font(.manrope(12.5))
+                    .padding(.leading, labelWidth + 12)
+            } else if plain.isEmpty && lanes.isEmpty {
                 HStack(spacing: 8) {
                     KeyCap(key: "M")
                     Text("drops a marker at the playhead.")
@@ -958,7 +956,9 @@ struct TimelinePanel: View {
             .disabled(model.locked)
             .frame(width: labelWidth, alignment: .leading)
             HStack(spacing: 6) {
-                if lanes.contains(where: { $0.key != nil }) {
+                if model.recordingFromDesk {
+                    DeskRecordingLine()
+                } else if lanes.contains(where: { $0.key != nil }) {
                     Image(systemName: "keyboard").foregroundStyle(Brand.space)
                     Text("Press a lane's key while it plays to drop a trigger.")
                     KeyCap(key: "⌫").padding(.leading, 4)
@@ -974,7 +974,7 @@ struct TimelinePanel: View {
             .foregroundStyle(Brand.graphite)
             .lineLimit(1)
             .truncationMode(.tail)
-            .opacity(model.selectedMarkerIDs.isEmpty ? 1 : 0)
+            .opacity(model.selectedMarkerIDs.isEmpty || model.recordingFromDesk ? 1 : 0)
             Spacer(minLength: 8)
             Toggle(isOn: $control.settings.keysFire) {
                 Text("Keys fire the console").font(.manrope(11.5, .medium)).foregroundStyle(Brand.steel)
@@ -1059,6 +1059,94 @@ struct WaveformView: View, Equatable {
             ctx.fill(path, with: .color(played ? Color(hex: 0xE9E9EE) : Color(hex: 0x3A3C46)))
         }
         .drawingGroup()
+    }
+}
+
+// MARK: Firing pulse
+
+/// Plays once each time `fired` changes: what just fired swells a touch and glows, then settles.
+/// Animated on its own, so it shows whether or not the song is rolling. Reduce Motion: a glow only.
+struct FirePulse: ViewModifier {
+    enum Style { case bump, glow }
+    let fired: Date?
+    var color: Color = Brand.gold
+    var style: Style = .bump
+    /// 1 when settled; 0 at the moment of firing.
+    @State private var settle: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let p = 1 - settle
+        return Group {
+            switch style {
+            case .bump:
+                content
+                    .scaleEffect(reduceMotion ? 1 : 1 + 0.14 * p)
+                    .shadow(color: color.opacity(0.85 * p), radius: 10 * p)
+            case .glow:
+                content
+                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(color.opacity(0.32 * p)))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(color.opacity(0.7 * p), lineWidth: 1))
+            }
+        }
+        .onChange(of: fired) { _ in
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { settle = 0 }
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: style == .bump ? 0.275 : 0.4)) { settle = 1 }
+            }
+        }
+    }
+}
+
+/// A soft gold bloom behind a trigger's line as it fires.
+struct FireBloom: View {
+    let fired: Date?
+    let height: CGFloat
+    @State private var settle: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let p = 1 - settle
+        Capsule()
+            .fill(Brand.gold)
+            .frame(width: reduceMotion ? 3 : 3 + 18 * p, height: height)
+            .blur(radius: reduceMotion ? 0 : 5 * p)
+            .opacity(0.9 * Double(p))
+            .allowsHitTesting(false)
+            .onChange(of: fired) { _ in
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { settle = 0 }
+                DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.3)) { settle = 1 } }
+            }
+    }
+}
+
+/// "● Recording from the desk · OSC GO 1.201 → Main cues at 03:00:12:04", while armed: one line
+/// in place of the lane hint, so nothing moves.
+struct DeskRecordingLine: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var transport: Transport
+    @EnvironmentObject private var control: ControlCenter
+
+    var body: some View {
+        HStack(spacing: 7) {
+            StatusDot(color: Color(hex: 0xE5675A), pulsing: transport.isPlaying)
+            Text(transport.isPlaying ? "Recording from the desk" : "Armed · play to record")
+                .fontWeight(.bold).foregroundStyle(Brand.ink)
+            if let last = model.lastDeskGo, Date().timeIntervalSince(last.at) < 20 {
+                Text("· " + last.text).foregroundStyle(Brand.steel).monospacedDigit()
+            } else if control.deskStatus.hasPrefix("Port") {
+                Text("· " + control.deskStatus).foregroundStyle(Brand.warn)
+            } else {
+                Text("· each GO lands on its executor's lane").foregroundStyle(Brand.space)
+            }
+        }
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .help("GOs arrive as OSC /vivid/exec (\"1.201\") or MIDI Show Control. ⌘Z takes back what was recorded.")
     }
 }
 
