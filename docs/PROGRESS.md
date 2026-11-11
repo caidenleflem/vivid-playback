@@ -666,3 +666,9 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   (and in the pill's tooltip), e.g. "macOS blocked it … allow Vivid Playback in Privacy &
   Security › Local Network", "No way to reach 10.0.0.69", "The network port picked for grandMA3
   isn't connected", "… isn't an IP address".
+- Not the signing: the GitHub build (0.2.72) doesn't send either, and nothing shows in the desk's
+  command line. Next suspect: onPC on the same Mac listening on 8000, the port OSC in also took
+  (shared, so the two split the messages silently). OSC in and MIDI Show Control in now take
+  their port alone: another app on it shows "Port 8000 is in use by another app (grandMA3 onPC…)".
+  A console target that's this Mac on the OSC-in port gets a warning and a one-click "Listen on
+  8001 instead". Art-Net in stays shared.

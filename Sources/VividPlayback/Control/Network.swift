@@ -14,7 +14,10 @@ final class UDPSocket: @unchecked Sendable {
     /// Bound to `port` to listen, or unbound just to send. With `networkPort`, everything it
     /// sends goes out that port and it only hears what arrives on it; nil if that port isn't
     /// there right now.
-    init?(listenOn port: UInt16? = nil, networkPort: String? = nil) {
+    /// `shared`: other apps may listen on the same port too (Art-Net, where every app should
+    /// hear the broadcast). Not shared, the port is this app's alone, and another app already on
+    /// it makes this fail, so the conflict shows instead of the two silently splitting the messages.
+    init?(listenOn port: UInt16? = nil, networkPort: String? = nil, shared: Bool = true) {
         var index: UInt32 = 0
         if let networkPort {
             index = if_nametoindex(networkPort)
@@ -24,8 +27,10 @@ final class UDPSocket: @unchecked Sendable {
         guard fd >= 0 else { return nil }
         var yes: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &yes, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
+        if shared || port == nil {
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
+        }
         if index != 0 {
             // IP_BOUND_IF (25 in <netinet/in.h>): tie the socket to one interface.
             guard setsockopt(fd, IPPROTO_IP, 25, &index, socklen_t(MemoryLayout<UInt32>.size)) == 0 else {

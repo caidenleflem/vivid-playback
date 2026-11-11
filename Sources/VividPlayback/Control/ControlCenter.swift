@@ -224,6 +224,14 @@ final class ControlCenter: ObservableObject {
 
     var addresses: [String] { UDPSocket.localAddresses().map(\.address) }
 
+    /// A console that's this Mac (onPC) on the same port OSC in listens on: what Vivid sends it
+    /// can land back in Vivid instead. Nil when there's no clash.
+    var portClash: ConsoleTarget? {
+        guard settings.oscIn else { return nil }
+        let mine = Set(addresses + ["127.0.0.1", "localhost"])
+        return settings.consoles.first { $0.enabled && $0.port == settings.oscPort && (mine.contains($0.host) || $0.host.hasPrefix("127.")) }
+    }
+
     // MARK: Applying settings
 
     private func apply(old: ControlSettings?) {
@@ -278,8 +286,8 @@ final class ControlCenter: ObservableObject {
         osc = nil
         guard settings.oscIn else { oscStatus = "Off"; return }
         if let why = unavailable(settings.oscInPort) { oscStatus = why; return }
-        guard let socket = UDPSocket(listenOn: settings.oscPort, networkPort: settings.oscInPort) else {
-            oscStatus = "Port \(settings.oscPort) is in use by another app. Choose another port."
+        guard let socket = UDPSocket(listenOn: settings.oscPort, networkPort: settings.oscInPort, shared: false) else {
+            oscStatus = "Port \(settings.oscPort) is in use by another app (grandMA3 onPC on this Mac listens on 8000). Choose another port, like 8001."
             return
         }
         socket.listen(on: netQueue) { [weak self] data, from in
@@ -333,7 +341,7 @@ final class ControlCenter: ObservableObject {
             deskStatus = "MIDI Show Control over the network: " + why
             return
         }
-        guard let socket = UDPSocket(listenOn: settings.mscPort, networkPort: settings.mscInPort) else {
+        guard let socket = UDPSocket(listenOn: settings.mscPort, networkPort: settings.mscInPort, shared: false) else {
             deskStatus = "Port \(settings.mscPort) is in use: MIDI Show Control over the network can't be heard. OSC and MIDI still work."
             return
         }

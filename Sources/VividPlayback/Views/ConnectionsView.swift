@@ -682,6 +682,18 @@ struct ConnectionsView: View {
                 }
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.3)))
+                if let clash = control.portClash {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(clash.name) is on this Mac and uses port \(clash.port), the same port Vivid listens on, so triggers sent to it can land back here. Listen on another port, and have the desk send to that one.")
+                            .font(.manrope(12)).foregroundStyle(Brand.warn).fixedSize(horizontal: false, vertical: true)
+                        Button("Listen on \(control.settings.oscPort == 8001 ? 8002 : 8001) instead") {
+                            let p: UInt16 = control.settings.oscPort == 8001 ? 8002 : 8001
+                            control.settings.oscPort = p
+                            portText = String(p)
+                        }
+                        .buttonStyle(QuietButtonStyle(prominent: true))
+                    }
+                }
                 if on { OSCHeardBox(monitor: control.oscMonitor, port: control.settings.oscPort) }
             }
         }
