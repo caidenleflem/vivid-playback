@@ -581,3 +581,6 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   at yet. Suspects to check first: the meters now publish up to 120 changes a second (60 Hz, level
   and hold separately) and every view watching them redraws; the beat grid lines redraw with the
   static layer whenever the zoomed window pages along; and the transport's 20 ms tick.
+- Caiden: the meters are still glitchy after the 60 Hz / hold-between-blocks change. Likely the
+  same root as the timeline (the main thread busy redrawing, so meter reads and redraws come late
+  and uneven), or the peak reset racing the audio thread. Look at both together.
