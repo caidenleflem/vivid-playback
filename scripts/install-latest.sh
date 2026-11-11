@@ -14,8 +14,13 @@ TMP=$(mktemp -d)
 curl -fL --progress-bar -o "$TMP/VividPlayback.dmg" "$URL"
 
 MOUNT=$(hdiutil attach -nobrowse -noautoopen "$TMP/VividPlayback.dmg" | tail -1 | awk -F'\t' '{print $NF}')
+# Quit the running copy and wait until it's really gone, so the new one is what opens.
 osascript -e 'tell application "Vivid Playback" to quit' >/dev/null 2>&1 || true
-sleep 1
+for _ in $(seq 1 40); do pgrep -x "Vivid Playback" >/dev/null || break; sleep 0.25; done
+if pgrep -x "Vivid Playback" >/dev/null; then
+  echo "Vivid Playback is still open (a window or a question may be waiting). Quit it, then run this again."
+  exit 1
+fi
 rm -rf "/Applications/Vivid Playback.app"
 cp -R "$MOUNT/Vivid Playback.app" /Applications/
 hdiutil detach "$MOUNT" -quiet || true

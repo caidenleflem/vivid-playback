@@ -32,8 +32,13 @@ echo "Building: $COMMIT"
 # Same numbering as the GitHub builds' 0.2.x, marked as built here.
 VERSION="0.2.$(date +%m%d%H%M)" UNIVERSAL=0 ./scripts/make-app.sh
 
+# Quit the running copy and wait until it's really gone, so the new one is what opens.
 osascript -e 'tell application "Vivid Playback" to quit' >/dev/null 2>&1 || true
-sleep 1
+for _ in $(seq 1 40); do pgrep -x "Vivid Playback" >/dev/null || break; sleep 0.25; done
+if pgrep -x "Vivid Playback" >/dev/null; then
+  echo "Vivid Playback is still open (a window or a question may be waiting). Quit it, then run this again."
+  exit 1
+fi
 rm -rf "$APP"
 cp -R "build/Vivid Playback.app" "$APP"
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true

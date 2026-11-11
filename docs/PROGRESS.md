@@ -609,3 +609,7 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - **Needs a check on the desk (2.3.2.0):** the plugin imports (XML shape), `CurrentExecPage`,
   executor `Object`, `seq:CurrentChild()` and cue `No` read as expected (run the "test"
   argument), SendOSC arrives, and `Goto Cue 5 Page 3.201` is the right Goto.
+- Install scripts gave the app one second to quit; when it took longer, the new build was copied
+  in under the old one still running, and opening it brought back the old window (Caiden saw no
+  plugin button after a good build). Both scripts now wait for it to quit, and stop with a note if
+  it won't.
