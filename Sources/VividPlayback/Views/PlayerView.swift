@@ -266,6 +266,7 @@ private struct UpNextPanel: View {
         let upcoming = Array(q.enumerated()).filter { $0.offset > current }
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                guard upcoming.count > 1 || expanded else { return }
                 withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .vivid(0.35)) { expanded.toggle() }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -287,8 +288,7 @@ private struct UpNextPanel: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(upcoming.count <= 1)
-            .help(expanded ? "Show just the next song" : "Show the rest of the set")
+            .help(upcoming.count > 1 ? (expanded ? "Show just the next song" : "Show the rest of the set") : "")
             .padding(.horizontal, 16)
             .padding(.top, 16)
             .padding(.bottom, 10)
