@@ -42,8 +42,9 @@ public enum DeskPlugin {
 
         static let luaTemplate = #"""
         -- Vivid Labels for grandMA3 (made for 2.3)
-        -- Run it on the fader page you want: it sends the name of each executor's sequence to
-        -- Vivid Playback, which names the lanes that fire those executors.
+        -- Run it on the fader page you want: a window asks before it sends the name of each
+        -- executor's sequence to Vivid Playback, which names the lanes that fire those executors.
+        -- Plugin "Vivid Labels" "send" sends without asking.
         -- OSC_LINE is the line in Menu > In & Out > OSC that sends to the Mac running Vivid Playback.
 
         local OSC_LINE = __OSC_LINE__
@@ -76,24 +77,69 @@ public enum DeskPlugin {
           return s
         end
 
+
+        -- The OSC line, remembered on the desk once set in the plugin's window (the file's OSC_LINE
+        -- until then).
+        local function oscLine()
+          local ok, v = pcall(function() return GetVar(GlobalVars(), "VividOSCLine") end)
+          local n = ok and tonumber(v) or nil
+          if n ~= nil and n >= 1 then return math.floor(n) end
+          return OSC_LINE
+        end
+
+        local function setOscLine(n)
+          if n ~= nil and n >= 1 then pcall(function() SetVar(GlobalVars(), "VividOSCLine", math.floor(n)) end) end
+        end
+
+        -- A window with buttons (and the OSC line to send on). Returns the button's value, or nil
+        -- when the desk can't show one.
+        local function window(title, message, buttons)
+          local ok, r = pcall(function()
+            return MessageBox({
+              title = title,
+              message = message,
+              commands = buttons,
+              inputs = { { name = "OSC line", value = tostring(oscLine()), whiteFilter = "0123456789" } },
+            })
+          end)
+          if not ok or type(r) ~= "table" then return nil end
+          if type(r.inputs) == "table" then setOscLine(tonumber(r.inputs["OSC line"])) end
+          return r.result
+        end
+
         local function Main(display, argument)
           local page = CurrentExecPage()
           local pageNo = tonumber(prop(page, "No")) or 1
-          local sent = 0
+          local named = {}
           for _, exec in ipairs(children(page)) do
             local seq = prop(exec, "Object")
             local no = tonumber(prop(exec, "No"))
             if seq ~= nil and no ~= nil and className(seq) == "Sequence" then
               local name = clean(prop(seq, "Name"))
-              if name ~= "" then
-                local cmd = string.format('SendOSC %d "/vivid/label,ss,%d.%d,%s"', OSC_LINE, pageNo, no, name)
+              if name ~= "" then named[#named + 1] = { no = no, name = name } end
+            end
+          end
+          if string.lower(tostring(argument or "")) ~= "send" then
+            local choice = window("Vivid Labels",
+              string.format("Send the names of the %d sequence%s on fader page %d to Vivid Playback?\nLanes that fire them take their names.",
+                #named, #named == 1 and "" or "s", pageNo),
+              { { value = 1, name = "Send" }, { value = 0, name = "Cancel" } })
+            if choice ~= nil and choice ~= 1 then return end
+          end
+          local line = oscLine()
+          local sent = 0
+          for _, e in ipairs(named) do
+            local no, name = e.no, e.name
+            do
+              do
+                local cmd = string.format('SendOSC %d "/vivid/label,ss,%d.%d,%s"', line, pageNo, no, name)
                 if not (CmdIndirect ~= nil and pcall(function() CmdIndirect(cmd) end)) then pcall(function() Cmd(cmd) end) end
                 sent = sent + 1
                 coroutine.yield(0.01)
               end
             end
           end
-          Printf("Vivid Labels sent %d name%s from page %d on OSC line %d.", sent, sent == 1 and "" or "s", pageNo, OSC_LINE)
+          Printf("Vivid Labels sent %d name%s from page %d on OSC line %d.", sent, sent == 1 and "" or "s", pageNo, line)
         end
 
         return Main
@@ -116,8 +162,9 @@ public enum DeskPlugin {
 
     static let luaTemplate = #"""
     -- Vivid Recorder for grandMA3 (made for 2.3)
-    -- Vivid Playback starts and stops it with Record desk (Plugin "Vivid Recorder" "start" / "stop");
-    -- run by hand it starts, and run again it stops. It stops by itself after three hours.
+    -- Run by hand, a window shows whether it's on and has Start / Stop, Test and the OSC line.
+    -- Vivid Playback starts and stops it with Record desk (Plugin "Vivid Recorder" "start" / "stop",
+    -- no window). It stops by itself after three hours.
     -- While it runs, each press-made change of cue, or on/off, on the sequences of the fader page
     -- you're on goes to Vivid Playback over OSC. It never sends the instant a cue fires: changes
     -- wait a quarter of a second and go through the command queue, so a macro a cue starts runs
@@ -131,6 +178,35 @@ public enum DeskPlugin {
     local LOOK_EVERY = 0.01   -- seconds between looks at the executors
     local SETTLE = 25         -- looks to wait before sending a change (a quarter of a second)
     local MAX_LOOKS = 3 * 60 * 60 * 100   -- stops by itself after three hours
+
+    -- The OSC line, remembered on the desk once set in the plugin's window (the file's OSC_LINE
+    -- until then).
+    local function oscLine()
+      local ok, v = pcall(function() return GetVar(GlobalVars(), "VividOSCLine") end)
+      local n = ok and tonumber(v) or nil
+      if n ~= nil and n >= 1 then return math.floor(n) end
+      return OSC_LINE
+    end
+
+    local function setOscLine(n)
+      if n ~= nil and n >= 1 then pcall(function() SetVar(GlobalVars(), "VividOSCLine", math.floor(n)) end) end
+    end
+
+    -- A window with buttons (and the OSC line to send on). Returns the button's value, or nil
+    -- when the desk can't show one.
+    local function window(title, message, buttons)
+      local ok, r = pcall(function()
+        return MessageBox({
+          title = title,
+          message = message,
+          commands = buttons,
+          inputs = { { name = "OSC line", value = tostring(oscLine()), whiteFilter = "0123456789" } },
+        })
+      end)
+      if not ok or type(r) ~= "table" then return nil end
+      if type(r.inputs) == "table" then setOscLine(tonumber(r.inputs["OSC line"])) end
+      return r.result
+    end
 
     -- Sends a command without cutting into whatever the desk is running (a macro a cue started):
     -- through the command queue when the desk offers it.
@@ -252,7 +328,7 @@ public enum DeskPlugin {
 
     local function message(key, now, before, stamp)
       return string.format('SendOSC %d "/vivid/seq,ssssssss,%s,%s,%s,%d,%d,%s,%s,%.4f"',
-        OSC_LINE, key, now.on and "on" or "off", cueText(now.number), now.index,
+        oscLine(), key, now.on and "on" or "off", cueText(now.number), now.index,
         before.index, before.on and "on" or "off", clean(now.name), stamp)
     end
 
@@ -306,12 +382,25 @@ public enum DeskPlugin {
         Printf("  %s  %s  cue %s (place %d)  %s  trig: %s%s", e.key, on and "on" or "off", cueText(number), index,
           tostring(name or ""), current and trigOf(current) or "-", auto and "  (runs itself: not recorded)" or "")
       end
-      Printf("It would send them on OSC line %d. Desk clock reads %s.", OSC_LINE, tostring(deskTime()))
+      Printf("It would send them on OSC line %d. Desk clock reads %s.", oscLine(), tostring(deskTime()))
       dumpTimecodes()
     end
 
     local function Main(display, argument)
       local arg = string.lower(tostring(argument or ""))
+      -- Run by hand: the window decides.
+      if arg == "" then
+        local running = _G.VividRecorderRunning == true
+        local page = tonumber(prop(CurrentExecPage(), "No")) or 1
+        local choice = window("Vivid Recorder",
+          string.format("Recording to Vivid Playback is %s.\nIt watches the sequences on fader page %d and sends each press. Vivid Playback's Record desk starts and stops it too.",
+            running and "ON" or "OFF", page),
+          { { value = 1, name = running and "Stop" or "Start" }, { value = 2, name = "Test" }, { value = 0, name = "Close" } })
+        if choice == 0 then return end
+        if choice == 2 then test() return end
+        if choice == 1 then arg = running and "stop" or "start" end
+        -- No window on this desk: it toggles, as before.
+      end
       if arg == "test" then test() return end
       if arg == "stop" or (arg ~= "start" and _G.VividRecorderRunning) then
         if _G.VividRecorderRunning then Printf("Vivid Recorder stopped.") end
@@ -320,7 +409,7 @@ public enum DeskPlugin {
       end
       if _G.VividRecorderRunning then return end   -- "start" while already running
       _G.VividRecorderRunning = true
-      Printf("Vivid Recorder is sending to Vivid Playback on OSC line %d.", OSC_LINE)
+      Printf("Vivid Recorder is sending to Vivid Playback on OSC line %d.", oscLine())
       local last = {}
       local pending = {}
       local looks = 0

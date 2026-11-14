@@ -782,3 +782,14 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - Caiden's immediate fix: run the plugin once more to stop it (or reload the show / restart).
 - **Needs a check on the desk:** `Plugin "Vivid Recorder" "start"` passes its argument, and
   CmdIndirect exists on 2.3.2.0.
+
+## 2026-11-14: plugin windows
+
+- Caiden wanted a window instead of just running the plugin. Run by hand, **Vivid Recorder**
+  opens a window (MA3 `MessageBox`): whether recording is ON or OFF, the fader page it watches,
+  Start / Stop, Test, Close, and an **OSC line** box. **Vivid Labels** asks first: "Send the names
+  of the N sequences on fader page X?" with Send / Cancel and the same box. The OSC line is
+  remembered on the desk (`SetVar(GlobalVars(), "VividOSCLine", …)`), so the .lua no longer needs
+  editing. Vivid's start/stop and `"send"` skip the window; a desk that can't show one toggles as
+  before. Checked on a mock desk.
+- **Needs a check on the desk:** the window shows, its OSC line box comes back with the number.

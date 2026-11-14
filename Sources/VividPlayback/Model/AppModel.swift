@@ -1309,7 +1309,7 @@ final class AppModel: ObservableObject {
             for f in DeskPlugin.allFiles(oscLine: 1) {
                 try f.contents.write(to: folder.appendingPathComponent(f.name), atomically: true, encoding: .utf8)
             }
-            post("Saved Vivid Recorder (run to start recording, again to stop) and Vivid Labels (run on a page to name the lanes after its sequences). Both send on OSC line 1; change OSC_LINE at the top of each .lua if yours is another.")
+            post("Saved Vivid Recorder and Vivid Labels. Run either on the desk and a window opens: the recorder's has Start / Stop and Test, Labels' asks before sending a page's names. Set the OSC line in the window; the desk remembers it.")
             NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent("\(DeskPlugin.name).xml")])
         } catch {
             post("Couldn't save the plugin: \(error.localizedDescription)")
