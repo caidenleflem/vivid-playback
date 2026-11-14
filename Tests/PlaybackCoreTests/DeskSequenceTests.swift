@@ -69,6 +69,7 @@ final class DeskSequenceTests: XCTestCase {
         XCTAssertEqual(files.map(\.name), ["VividRecorder.xml", "VividRecorder.lua"])
         XCTAssertTrue(files[1].contents.contains("local OSC_LINE = 2"))
         XCTAssertTrue(files[1].contents.contains("/vivid/seq,ssssssss,"), "eight arguments: the stamp is last")
+        XCTAssertTrue(files[1].contents.contains("CmdIndirect"), "sends through the command queue, not the live command line")
         XCTAssertTrue(files[0].contents.contains(#"FileName="VividRecorder.lua""#))
     }
 }

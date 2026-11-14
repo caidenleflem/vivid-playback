@@ -31,6 +31,9 @@ struct ControlSettings: Codable, Equatable {
     var oscInPort: String?
     var artNetInPort: String?
     var mscInPort: String?
+    /// Record desk also starts the Vivid Recorder plugin on the consoles, and stopping stops it,
+    /// so it never runs when nobody's recording.
+    var deskPluginFollows = true
 
     init() {}
 
@@ -61,6 +64,7 @@ struct ControlSettings: Codable, Equatable {
         oscInPort = try c.decodeIfPresent(String.self, forKey: .oscInPort)
         artNetInPort = try c.decodeIfPresent(String.self, forKey: .artNetInPort)
         mscInPort = try c.decodeIfPresent(String.self, forKey: .mscInPort)
+        deskPluginFollows = try c.decodeIfPresent(Bool.self, forKey: .deskPluginFollows) ?? d.deskPluginFollows
     }
 
     static func load() -> ControlSettings {

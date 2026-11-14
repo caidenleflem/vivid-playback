@@ -86,7 +86,8 @@ public enum DeskPlugin {
             if seq ~= nil and no ~= nil and className(seq) == "Sequence" then
               local name = clean(prop(seq, "Name"))
               if name ~= "" then
-                Cmd(string.format('SendOSC %d "/vivid/label,ss,%d.%d,%s"', OSC_LINE, pageNo, no, name))
+                local cmd = string.format('SendOSC %d "/vivid/label,ss,%d.%d,%s"', OSC_LINE, pageNo, no, name)
+                if not (CmdIndirect ~= nil and pcall(function() CmdIndirect(cmd) end)) then pcall(function() Cmd(cmd) end) end
                 sent = sent + 1
                 coroutine.yield(0.01)
               end
@@ -115,15 +116,29 @@ public enum DeskPlugin {
 
     static let luaTemplate = #"""
     -- Vivid Recorder for grandMA3 (made for 2.3)
-    -- Run it once to start, again to stop. While it runs, every change of cue, or on/off, on the
-    -- sequences of the fader page you're on is sent to Vivid Playback over OSC, to record onto
-    -- the selected song's lanes. Plugin "Vivid Recorder" "test" lists what it sees instead.
+    -- Vivid Playback starts and stops it with Record desk (Plugin "Vivid Recorder" "start" / "stop");
+    -- run by hand it starts, and run again it stops. It stops by itself after three hours.
+    -- While it runs, each press-made change of cue, or on/off, on the sequences of the fader page
+    -- you're on goes to Vivid Playback over OSC. It never sends the instant a cue fires: changes
+    -- wait a quarter of a second and go through the command queue, so a macro a cue starts runs
+    -- undisturbed (each one carries the desk's time, so the wait doesn't move it in Vivid).
+    -- Plugin "Vivid Recorder" "test" lists what it sees instead.
     --
     -- OSC_LINE is the line in Menu > In & Out > OSC that sends to the Mac running Vivid Playback
     -- (its address and the port Vivid listens on, with Send on).
 
     local OSC_LINE = __OSC_LINE__
     local LOOK_EVERY = 0.01   -- seconds between looks at the executors
+    local SETTLE = 25         -- looks to wait before sending a change (a quarter of a second)
+    local MAX_LOOKS = 3 * 60 * 60 * 100   -- stops by itself after three hours
+
+    -- Sends a command without cutting into whatever the desk is running (a macro a cue started):
+    -- through the command queue when the desk offers it.
+    local function issue(cmd)
+      local ok = false
+      if CmdIndirect ~= nil then ok = pcall(function() CmdIndirect(cmd) end) end
+      if not ok then pcall(function() Cmd(cmd) end) end
+    end
 
     local function prop(h, key)
       if h == nil then return nil end
@@ -235,10 +250,10 @@ public enum DeskPlugin {
       return -1
     end
 
-    local function send(key, now, before, stamp)
-      Cmd(string.format('SendOSC %d "/vivid/seq,ssssssss,%s,%s,%s,%d,%d,%s,%s,%.4f"',
+    local function message(key, now, before, stamp)
+      return string.format('SendOSC %d "/vivid/seq,ssssssss,%s,%s,%s,%d,%d,%s,%s,%.4f"',
         OSC_LINE, key, now.on and "on" or "off", cueText(now.number), now.index,
-        before.index, before.on and "on" or "off", clean(now.name), stamp))
+        before.index, before.on and "on" or "off", clean(now.name), stamp)
     end
 
     -- Lists the desk's timecode shows (their tracks and first events) so Vivid can learn how they
@@ -296,16 +311,26 @@ public enum DeskPlugin {
     end
 
     local function Main(display, argument)
-      if argument == "test" then test() return end
-      if _G.VividRecorderRunning then
+      local arg = string.lower(tostring(argument or ""))
+      if arg == "test" then test() return end
+      if arg == "stop" or (arg ~= "start" and _G.VividRecorderRunning) then
+        if _G.VividRecorderRunning then Printf("Vivid Recorder stopped.") end
         _G.VividRecorderRunning = false
-        Printf("Vivid Recorder stopped.")
         return
       end
+      if _G.VividRecorderRunning then return end   -- "start" while already running
       _G.VividRecorderRunning = true
-      Printf("Vivid Recorder is sending to Vivid Playback on OSC line %d. Run it again to stop.", OSC_LINE)
+      Printf("Vivid Recorder is sending to Vivid Playback on OSC line %d.", OSC_LINE)
       local last = {}
+      local pending = {}
+      local looks = 0
       while _G.VividRecorderRunning do
+        looks = looks + 1
+        if looks > MAX_LOOKS then
+          _G.VividRecorderRunning = false
+          Printf("Vivid Recorder stopped by itself after three hours.")
+          break
+        end
         -- One stamp per look: everything that changed since the last look happened just now.
         local stamp = deskTime()
         for _, e in ipairs(onThisPage()) do
@@ -319,12 +344,18 @@ public enum DeskPlugin {
           -- The first look at an executor (or a page) only learns where it is.
           -- Only presses: a cue that ran by itself (Follow, Time…) moves on without being sent.
           if before ~= nil and (before.on ~= now.on or before.number ~= now.number) and not (on and auto) then
-            send(e.key, now, before, stamp)
+            pending[#pending + 1] = { at = looks, cmd = message(e.key, now, before, stamp) }
           end
           last[e.key] = now
         end
+        -- Send what has waited long enough, oldest first.
+        while #pending > 0 and looks - pending[1].at >= SETTLE do
+          issue(table.remove(pending, 1).cmd)
+        end
         coroutine.yield(LOOK_EVERY)
       end
+      -- Whatever was still waiting when it stopped.
+      for _, p in ipairs(pending) do issue(p.cmd) end
     end
 
     return Main

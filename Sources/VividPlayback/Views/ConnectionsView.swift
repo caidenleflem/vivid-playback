@@ -432,6 +432,10 @@ struct ConnectionsView: View {
                                     Text("Best: the Vivid Recorder plugin. It watches the sequences on the fader page you're on and sends what each one does (Go+, Go-, Goto, Top, On, Off). Vivid Labels, run on a page, names the lanes after its sequences. OSC in must be on here, and the desk's OSC line needs Send on.")
                                         .font(.manrope(12.5)).foregroundStyle(Brand.steel).fixedSize(horizontal: false, vertical: true)
                                     Button("Save grandMA3 Plugins…") { model.saveDeskPlugin() }.buttonStyle(QuietButtonStyle())
+                                    Toggle("Record desk starts and stops the plugin on the desk", isOn: $control.settings.deskPluginFollows)
+                                        .toggleStyle(.switch).tint(Brand.gold).font(.manrope(12.5))
+                                    Text("So it only runs while you record: while it runs it sends on the desk's command line. It also stops by itself after three hours.")
+                                        .font(.manrope(11.5)).foregroundStyle(Brand.space).fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                             step(1, "Timeline › Record desk (⇧⌘R), then play the song. It stays on that song.")

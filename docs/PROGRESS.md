@@ -763,3 +763,22 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - Core: new `LaneAction` cases and `keyword`, `Marker.command`, `Song.importedDeskEvents`. 182
   tests pass.
 - **Needs a check on the desk:** the one-word functions and "Flash Off" as command lines.
+
+## 2026-11-14: the recorder plugin broke song macros on the desk
+
+- Caiden: with the plugin in, song macros triggered from a cue command no longer ran properly
+  (tapping them by hand did). Cause: while Vivid Recorder runs it sends a SendOSC on the desk's
+  command line the instant a sequence changes cue; a cue whose command starts a macro had its
+  macro cut into at that same moment. And the plugin kept running after recording stopped (it
+  only stopped when run again).
+- Fixed in the plugin: changes wait a quarter of a second, then go through the command queue
+  (`CmdIndirect`, falling back to `Cmd`), never the live command line at the moment a cue fires
+  (the desk-clock stamp keeps the timing). It takes "start" / "stop" arguments, ignores a second
+  start, sends anything still waiting when stopped, and stops by itself after three hours. Checked
+  on a mock desk.
+- Fixed in Vivid: Record desk sends `Plugin "Vivid Recorder" "start"` to the enabled consoles, and
+  stopping sends "stop" (also when Vivid quits mid-recording), so it only runs while recording.
+  A toggle under Record from the desk turns this off.
+- Caiden's immediate fix: run the plugin once more to stop it (or reload the show / restart).
+- **Needs a check on the desk:** `Plugin "Vivid Recorder" "start"` passes its argument, and
+  CmdIndirect exists on 2.3.2.0.

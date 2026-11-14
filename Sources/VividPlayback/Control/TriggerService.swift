@@ -119,6 +119,13 @@ final class TriggerService: @unchecked Sendable {
         }
     }
 
+    /// Sends one command line to the consoles at once and waits until it's gone (for quitting).
+    func sendNow(_ command: String, consoles: [ConsoleTarget]) {
+        queue.sync {
+            for console in consoles { _ = self.send(console.command(command).encoded(), to: console) }
+        }
+    }
+
     /// Sends command lines (one after another, a few milliseconds apart so a console isn't
     /// flooded), then reports how many went out and how many couldn't leave this Mac.
     func sendCommands(_ items: [(command: String, consoles: [ConsoleTarget])], done: @escaping (Int, Int) -> Void) {

@@ -229,7 +229,12 @@ final class AppModel: ObservableObject {
         control.onDeskLabel = { [weak self] label in self?.deskLabel(label) }
         // Whatever's still waiting to be saved is written before the app quits.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.flushSave(wait: true) }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.flushSave(wait: true)
+                // Never leave the desk's recorder running behind us.
+                if self.recordingFromDesk { self.deskRecorder(false, wait: true) }
+            }
         }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .magnify]) { [weak self] event in
             guard let self else { return event }
@@ -999,10 +1004,29 @@ final class AppModel: ObservableObject {
     /// The last GO heard from the desk, and what became of it.
     @Published private(set) var lastDeskGo: (text: String, at: Date)?
 
+    /// The consoles the desk recorder plugin is started and stopped on.
+    private var recorderConsoles: [ConsoleTarget] { control.settings.consoles.filter { $0.enabled && !$0.host.isEmpty } }
+
+    /// Starts or stops the Vivid Recorder plugin on the consoles, so it only runs while recording
+    /// (while it runs it sends on the desk's command line, which a busy show doesn't need).
+    private func deskRecorder(_ on: Bool, wait: Bool = false) {
+        guard control.settings.deskPluginFollows, !recorderConsoles.isEmpty else { return }
+        let command = "Plugin \"Vivid Recorder\" \"\(on ? "start" : "stop")\""
+        if wait {
+            control.triggers.sendNow(command, consoles: recorderConsoles)
+            return
+        }
+        control.triggers.sendCommands([(command, recorderConsoles)]) { [weak self] _, failed in
+            guard failed > 0 else { return }
+            self?.post("Couldn't reach the desk to \(on ? "start" : "stop") the Vivid Recorder plugin. \(on ? "Start" : "Stop") it there by hand.")
+        }
+    }
+
     func toggleDeskRecording() {
         guard !locked || recordingFromDesk else { return }
         recordingFromDesk.toggle()
         control.listenForDesk(recordingFromDesk)
+        deskRecorder(recordingFromDesk)
         if recordingFromDesk {
             let osc = control.settings.oscIn ? "OSC /vivid/exec on port \(control.settings.oscPort)" : "OSC (turn on OSC in under Connections)"
             post("Recording from the desk onto \(currentSong?.title ?? "the selected song"): the Vivid Recorder plugin or \(osc), and MIDI Show Control over MIDI or port \(control.settings.mscPort). It stops at the end of the song. Play it and fire away.")
