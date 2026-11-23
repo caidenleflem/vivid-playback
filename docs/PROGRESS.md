@@ -837,3 +837,24 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   muted lane print grey and say so. Printed landscape, black on white.
 - Core: `HitSheet` (rows, CSV with quoting and formula-safe text, a printable page). 190 tests pass.
 - **Needs a look on the Mac:** the print preview's table layout.
+
+## 2026-11-23: new edit, same cues
+
+- **New Edit of the Master…** (a song's right-click menu, and Playback › New Edit of This Song's
+  Master…): choose the new edit, and Vivid listens to both masters and finds each stretch of the
+  old one in the new one. A sheet says what changed in plain words ("4.00 s added at 1:28.40:
+  everything after is 4.00 s later", "6.00 s cut at 2:10.00", "1:30 to 1:40 is different music",
+  "the song starts 1.50 s later in the new file") and what happens to the triggers. Nothing moves
+  until **Use the New Edit**: then the master switches, the song's start follows the music, and
+  every trigger, marker and the beat grid move with it. Triggers in cut music go to the join;
+  ones in changed music are a best guess; both are selected afterwards so they're easy to find.
+  Edit › Undo Fix puts the old master and every trigger back. A song whose timecode comes from a
+  file gets a reminder to choose the new edit's timecode file too.
+- How it lines up: loudness at 20, 100 and 1000 a second; 4-second windows found in the new
+  master (keeping the last shift while the music still matches, so a repeated chorus doesn't pull
+  triggers onto the wrong repeat), then each edit point found to 10 ms and each stretch's shift
+  to 1 ms. A 5-minute song compares in about 0.05 s (0.3 s when nothing matches).
+- Core: `EditAligner`, `NewEditPlan`. Tested with synthetic music: a bar added, a section cut, a
+  longer lead-in, a 13.7 ms shift, a repeated chorus, a replaced section, a quieter remaster,
+  different sample rates, unrelated music. 203 tests pass.
+- **Needs a check on the Mac:** a real new edit of a song with triggers.

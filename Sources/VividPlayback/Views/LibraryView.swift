@@ -554,6 +554,11 @@ struct SongList: View {
             Divider()
             Button("Choose Master File…") { model.choose(.master, for: song) }.disabled(model.locked)
             Button("Choose Timecode File…") { model.choose(.timecode, for: song) }.disabled(model.locked)
+            if song.masterPath != nil {
+                Button("New Edit of the Master…") { model.newEdit(of: song) }
+                    .disabled(model.locked || model.comparingEdit != nil)
+                    .help("Choose the new edit: Vivid finds what moved and moves the triggers with the music, once you say so")
+            }
             if song.masterPath != nil { Button("Remove Master File") { model.removeFile(.master, from: song) }.disabled(model.locked) }
             if song.timecodePath != nil { Button("Remove Timecode File") { model.removeFile(.timecode, from: song) }.disabled(model.locked) }
             Divider()

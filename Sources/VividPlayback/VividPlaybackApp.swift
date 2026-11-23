@@ -104,6 +104,8 @@ struct PlaybackCommands: Commands {
             Button(model.recordingFromDesk ? "Stop Recording from the Desk" : "Record GOs from the Desk") { model.toggleDeskRecording() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(model.show == nil || (model.locked && !model.recordingFromDesk))
+            Button("New Edit of This Song's Master…") { if let s = model.currentSong { model.newEdit(of: s) } }
+                .disabled(model.locked || model.currentSong?.masterPath == nil || model.comparingEdit != nil)
             Button("Import grandMA3 Timecode…") { model.importMA3Timecode() }
                 .disabled(model.locked || model.show == nil)
             Button("Export Song as grandMA3 Timecode…") { model.exportMA3Timecode() }
@@ -302,6 +304,7 @@ struct RootView: View {
         .sheet(isPresented: $model.addAlbumShown) { AddAlbumSheet().environmentObject(model) }
         .sheet(item: $model.showInfoEntry) { entry in ShowInfoSheet(entry: entry).environmentObject(model) }
         .sheet(isPresented: $model.labelsShown) { LabelsSheet().environmentObject(model).environmentObject(model.control) }
+        .sheet(item: $model.newEditReview) { r in NewEditSheet(review: r).environmentObject(model) }
         .sheet(item: $model.markerEdit) { edit in RenameMarkerSheet(marker: edit.marker, song: edit.song, startAction: edit.action).environmentObject(model) }
         .sheet(item: $model.laneEdit) { lane in LaneEditor(lane: lane).environmentObject(model).environmentObject(model.control) }
     }

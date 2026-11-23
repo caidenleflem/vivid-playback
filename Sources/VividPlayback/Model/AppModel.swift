@@ -110,6 +110,14 @@ struct FixUndo {
     let label: String
 }
 
+/// A new edit of a song's master, compared with the old one, waiting for Caiden's OK.
+struct NewEditReview: Identifiable {
+    let id = UUID()
+    let song: Song
+    let newMaster: URL
+    let plan: NewEditPlan
+}
+
 struct MarkerEdit: Identifiable {
     let marker: Marker
     let song: Song
@@ -171,6 +179,10 @@ final class AppModel: ObservableObject {
     @Published var setlistEditorShown = false
     @Published var goToShown = false
     @Published var markerEdit: MarkerEdit?
+    /// A new edit compared and waiting to be used (or not).
+    @Published var newEditReview: NewEditReview?
+    /// The song whose new edit is being compared, while it is.
+    @Published var comparingEdit: UUID?
     @Published var selectedSetlistID: UUID? { didSet { keepSetReady() } }
     /// Show mode: playback only, nothing can be edited.
     @Published var locked = false
@@ -1256,6 +1268,103 @@ final class AppModel: ObservableObject {
         }
         post("Saved to \(folder.lastPathComponent): " + lines.joined(separator: " "))
         NSWorkspace.shared.activateFileViewerSelecting([folder])
+    }
+
+    // MARK: New edit, same cues
+
+    /// Picks a new edit of a song's master, compares it with the old one (off the main thread)
+    /// and shows what would move. Nothing changes until Caiden says so.
+    func newEdit(of song: Song) {
+        guard !locked else { post("Show mode is on. Turn it off (⇧⌘L) to change the show."); return }
+        guard let show, let oldURL = show.url(forMediaPath: song.masterPath) else {
+            post("\(song.title) has no master yet to compare with. Choose Master File… instead.")
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio]
+        panel.prompt = "Compare"
+        panel.message = "Choose the new edit of \(song.title)'s master. Vivid finds what moved and shows you before anything changes."
+        guard panel.runModal() == .OK, let newURL = panel.url else { return }
+        comparingEdit = song.id
+        post("Comparing \(song.title) with \(newURL.lastPathComponent)…")
+        let songID = song.id
+        Task { [weak self] in
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<EditAligner.Result, Error> in
+                Result {
+                    let old = try AppModel.monoSamples(oldURL), new = try AppModel.monoSamples(newURL)
+                    return EditAligner.align(old: old.samples, oldRate: old.rate, new: new.samples, newRate: new.rate)
+                }
+            }.value
+            guard let self else { return }
+            self.comparingEdit = nil
+            switch outcome {
+            case .success(let r):
+                guard let now = self.show?.song(id: songID) else { return }
+                self.newEditReview = NewEditReview(song: now, newMaster: newURL, plan: NewEditPlan(song: now, result: r))
+            case .failure(let e):
+                self.post("Couldn't read the audio to compare: \(e.localizedDescription)")
+            }
+        }
+    }
+
+    /// Uses the new edit: the new master, the start where the music now starts, and triggers,
+    /// markers and the beat grid moved with the music. One Undo Fix puts it all back.
+    func useNewEdit(_ review: NewEditReview) {
+        newEditReview = nil
+        guard !locked, var show, let before = show.song(id: review.song.id) else { return }
+        guard before == review.song else {
+            post("\(before.title) changed while it was being compared. Compare again to be sure.")
+            return
+        }
+        do {
+            _ = try ShowImporter.assign(review.newMaster, role: .master, songID: before.id, in: &show, reader: reader)
+        } catch {
+            post(String(describing: error))
+            return
+        }
+        guard let i = show.songs.firstIndex(where: { $0.id == before.id }) else { return }
+        var updated = review.plan.apply(to: show.songs[i])
+        updated.masterPath = show.songs[i].masterPath
+        show.songs[i] = updated
+        self.show = show
+        save()
+        lastFix = FixUndo(song: before, label: "New edit of \(before.title)")
+        filesChanged(updated)
+        let check = Set(review.plan.cut + review.plan.unsure)
+        if currentSong?.id == before.id, !check.isEmpty { selectedMarkerIDs = check }
+        var text = "\(before.title) now plays \(review.newMaster.lastPathComponent)."
+        let p = review.plan
+        if !p.moved.isEmpty { text += " \(p.moved.count) moved with the music." }
+        if !check.isEmpty { text += " \(check.count) to check (selected)." }
+        post(text, undo: true)
+    }
+
+    /// One channel (the channels averaged), read in pieces so a long song doesn't need its
+    /// whole stereo file in memory twice.
+    nonisolated static func monoSamples(_ url: URL) throws -> (samples: [Float], rate: Double) {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        let chunk: AVAudioFrameCount = 1 << 16
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else {
+            throw AudioFileError.unreadable(url.lastPathComponent)
+        }
+        var out = [Float]()
+        out.reserveCapacity(Int(file.length))
+        let channels = Int(format.channelCount)
+        while file.framePosition < file.length {
+            try file.read(into: buffer, frameCount: chunk)
+            let n = Int(buffer.frameLength)
+            guard n > 0, let data = buffer.floatChannelData else { break }
+            for i in 0..<n {
+                var s: Float = 0
+                for c in 0..<channels { s += data[c][i] }
+                out.append(s / Float(max(1, channels)))
+            }
+        }
+        return (out, format.sampleRate)
     }
 
     // MARK: Hit sheets

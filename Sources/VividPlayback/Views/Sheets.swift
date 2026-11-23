@@ -950,3 +950,60 @@ struct LabelsSheet: View {
         .opacity(on ? 1 : 0.5)
     }
 }
+
+// MARK: New edit
+
+/// What a new edit of the master would change, before anything does.
+struct NewEditSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let review: NewEditReview
+
+    var body: some View {
+        let plan = review.plan
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New edit of \(review.song.title)").font(.manrope(22, .semibold)).foregroundStyle(Brand.ink)
+            Text(review.newMaster.lastPathComponent).font(.manrope(13)).foregroundStyle(Brand.steel)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(plan.summary().enumerated()), id: \.offset) { _, line in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Circle().fill(Brand.gold).frame(width: 5, height: 5)
+                        Text(line).font(.manrope(13.5)).foregroundStyle(Brand.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.05)))
+            if !plan.noMatch && !(plan.cut.isEmpty && plan.unsure.isEmpty) {
+                Text("Anything in cut or changed music is selected afterwards, so you can find it.")
+                    .font(.manrope(12.5)).foregroundStyle(Brand.steel)
+            }
+            if review.song.timecodePath != nil && !plan.noMatch {
+                Text("This song's timecode comes from a file. If the new edit has its own timecode file, choose it too (Choose Timecode File…).")
+                    .font(.manrope(12.5)).foregroundStyle(Brand.steel).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(QuietButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                if !plan.noMatch {
+                    Button(plan.isSame ? "Use the New File" : "Use the New Edit") {
+                        dismiss()
+                        model.useNewEdit(review)
+                    }
+                    .buttonStyle(QuietButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            Text("Edit › Undo Fix puts the old master and every trigger back.")
+                .font(.manrope(11.5)).foregroundStyle(Brand.steel.opacity(0.8))
+        }
+        .padding(24)
+        .frame(width: 520)
+        .background(Brand.phantom)
+        .preferredColorScheme(.dark)
+    }
+}
