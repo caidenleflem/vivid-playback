@@ -165,18 +165,13 @@ final class ControlCenter: ObservableObject {
     let midi = MIDIService()
     let sender: TimecodeSender
     let triggers: TriggerService
-    /// When each trigger last fired (for the gold flash in the timeline).
-    @Published private(set) var firedAt: [UUID: Date] = [:]
-    /// When each lane last fired a trigger (the lane's pulse).
-    @Published private(set) var laneFiredAt: [UUID: Date] = [:]
+    /// When triggers and lanes last fired by hand (Fire now, keys, recording): the gold flash in
+    /// the timeline. Its own object, so a flash redraws only what flashes.
+    let fires = FireMonitor()
     /// The last trigger sent, for the Consoles section.
     private(set) var lastTrigger: (text: String, ok: Bool, at: Date)?
     /// Lights a trigger in the timeline as if it had just fired.
-    func flash(_ id: UUID?, lane: UUID?) {
-        let now = Date()
-        if let id { firedAt[id] = now }
-        if let lane { laneFiredAt[lane] = now }
-    }
+    func flash(_ id: UUID?, lane: UUID?) { fires.flash(id, lane: lane) }
     /// Set by the app model: re-arm triggers when consoles or timing change.
     var onTriggerSettingsChange: (() -> Void)?
     private let netQueue = DispatchQueue(label: "vivid.network.in", qos: .userInteractive)
@@ -463,9 +458,9 @@ final class ControlCenter: ObservableObject {
         guard settings.follow != .off, let ctx = followContext?() else { return }
         let actions = chase.receive(tc, at: time, songs: ctx.songs, currentSongID: ctx.current, playhead: ctx.playhead, playing: ctx.playing)
         if let found = ChaseEngine.locate(tc, in: ctx.songs) {
-            followStatus = chase.isRunning ? "Following · \(found.song.title)" : "Parked · \(found.song.title)"
+            setFollowStatus(chase.isRunning ? "Following · \(found.song.title)" : "Parked · \(found.song.title)")
         } else {
-            followStatus = "No song at \(tc)"
+            setFollowStatus("No song at \(tc)")
         }
         if !actions.isEmpty { onFollow?(actions) }
     }
@@ -483,6 +478,12 @@ final class ControlCenter: ObservableObject {
     }
 
     var isFollowing: Bool { settings.follow != .off }
+
+    /// Incoming timecode arrives 30 times a second: the status only changes (and redraws what
+    /// shows it) when it says something new.
+    private func setFollowStatus(_ text: String) {
+        if followStatus != text { followStatus = text }
+    }
 }
 
 /// The last OSC messages that arrived, newest first, and what became of them.
@@ -500,5 +501,18 @@ final class OSCMonitor: ObservableObject {
     func add(_ h: Heard) {
         items.insert(h, at: 0)
         if items.count > 8 { items.removeLast(items.count - 8) }
+    }
+}
+
+/// When triggers and lanes last fired by hand, for the gold flash in the timeline.
+@MainActor
+final class FireMonitor: ObservableObject {
+    @Published private(set) var firedAt: [UUID: Date] = [:]
+    @Published private(set) var laneFiredAt: [UUID: Date] = [:]
+
+    func flash(_ id: UUID?, lane: UUID?) {
+        let now = Date()
+        if let id { firedAt[id] = now }
+        if let lane { laneFiredAt[lane] = now }
     }
 }

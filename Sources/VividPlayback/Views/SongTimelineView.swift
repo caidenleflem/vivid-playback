@@ -186,7 +186,9 @@ struct SongTimelineView: View {
 struct TimelinePanel: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var transport: Transport
-    @EnvironmentObject private var control: ControlCenter
+    /// Read, not watched: connections change often (incoming timecode, OSC, flashes) and none of
+    /// it should redraw every lane.
+    private var control: ControlCenter { model.control }
     let song: Song
     /// A trigger being dragged along its lane, and how far.
     @State private var dragging: (id: UUID, dx: CGFloat)?
@@ -271,7 +273,7 @@ struct TimelinePanel: View {
                     markerLines(width: trackWidth, win: win, height: linesBottom - 30)
                         .offset(x: labelWidth + 12)
                     liveLayer(length: length, trackWidth: trackWidth, waveHeight: waveHeight,
-                              linesBottom: linesBottom, rows: rows)
+                              linesBottom: linesBottom, rows: rows, times: triggerTimes())
                         .allowsHitTesting(false)
                     marqueeBox
                   }
@@ -365,7 +367,8 @@ struct TimelinePanel: View {
     /// played part of the waveform, and the pulse of each trigger as the playhead (the position
     /// you hear) crosses it, so pulses land with the sound. Paging along when zoomed starts here.
     private func liveLayer(length: Double, trackWidth: CGFloat, waveHeight: CGFloat, linesBottom: CGFloat,
-                           rows: [(laneID: UUID?, top: CGFloat, height: CGFloat)]) -> some View {
+                           rows: [(laneID: UUID?, top: CGFloat, height: CGFloat)],
+                           times: [(t: Double, marker: Marker)]) -> some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !transport.isPlaying)) { _ in
             let position = min(transport.position(at: CACurrentMediaTime()), length)
             let win = livePage(staticWindow(length: length), playhead: position)
@@ -382,7 +385,7 @@ struct TimelinePanel: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .offset(x: labelWidth + 12, y: 32)
                 if transport.isPlaying {
-                    pulses(position: position, win: win, width: trackWidth, rows: rows)
+                    pulses(position: position, win: win, width: trackWidth, rows: rows, times: times)
                 }
                 if playheadX >= -1 && playheadX <= trackWidth + 1 {
                     playhead(position: position, height: linesBottom - 18)
@@ -407,7 +410,8 @@ struct TimelinePanel: View {
     /// The bloom on each trigger and the glow on its lane's name, from the moment the playhead
     /// crosses it: as fast as the sound, with no trip through the main thread.
     private func pulses(position: Double, win: TimelineWindow, width: CGFloat,
-                        rows: [(laneID: UUID?, top: CGFloat, height: CGFloat)]) -> some View {
+                        rows: [(laneID: UUID?, top: CGFloat, height: CGFloat)],
+                        times: [(t: Double, marker: Marker)]) -> some View {
         let bloomTime = 0.3, glowTime = 0.4
         var blooms: [(id: UUID, x: CGFloat, top: CGFloat, height: CGFloat, p: CGFloat)] = []
         var glows: [(id: UUID, top: CGFloat, height: CGFloat, p: CGFloat, color: Color)] = []
@@ -417,10 +421,18 @@ struct TimelinePanel: View {
         var laneFor: [UUID: TriggerLane] = [:]
         for l in lanes where !l.muted { laneFor[l.id] = l }
         var strongest: [UUID: CGFloat] = [:]
-        let fps = song.rate.framesPerSecond
-        for m in song.markers {
+        // Only the triggers in the last fraction of a second: found by halving the sorted list,
+        // so a song with thousands of triggers costs the same per frame as one with ten.
+        var lo = 0, hi = times.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if times[mid].t <= position - glowTime { lo = mid + 1 } else { hi = mid }
+        }
+        for item in times[lo...] {
+            let t = item.t, m = item.marker
+            if t > position { break }
             guard let laneID = m.laneID, let row = rowFor[laneID], laneFor[laneID] != nil else { continue }
-            let dt = position - Double(m.time.frames(since: song.start)) / fps
+            let dt = position - t
             guard dt >= 0, dt < glowTime else { continue }
             strongest[laneID] = max(strongest[laneID] ?? 0, CGFloat(1 - dt / glowTime))
             if dt < bloomTime {
@@ -557,6 +569,18 @@ struct TimelinePanel: View {
             .opacity(0.7)
             .clipShape(RoundedRectangle(cornerRadius: 6))
         )
+    }
+
+    /// Every trigger on a lane with its song time, in time order: worked out once per redraw of
+    /// the timeline, not once per frame.
+    private func triggerTimes() -> [(t: Double, marker: Marker)] {
+        let fps = song.rate.framesPerSecond
+        var out: [(t: Double, marker: Marker)] = []
+        for m in song.markers where m.laneID != nil {
+            out.append((t: Double(m.time.frames(since: song.start)) / fps, marker: m))
+        }
+        out.sort { $0.t < $1.t }
+        return out
     }
 
     private func xPos(of marker: Marker, width: CGFloat, win: TimelineWindow) -> CGFloat {
@@ -891,7 +915,7 @@ struct TimelinePanel: View {
             .padding(.trailing, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.white.opacity(selected ? 0.07 : 0)))
-            .modifier(FirePulse(fired: control.laneFiredAt[lane.id], color: color, style: .glow))
+            .modifier(FirePulse(fires: control.fires, id: lane.id, lane: true, color: color, style: .glow))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -958,11 +982,11 @@ struct TimelinePanel: View {
         return HStack(spacing: 5) {
             if flip && showLabel { chip }
             Capsule().fill(fired || selected ? Brand.gold : color).frame(width: fired || selected ? 3 : 2, height: max(8, height - 8))
-                .background(FireBloom(fired: control.firedAt[m.id], height: max(8, height - 8)))
+                .background(FireBloom(fires: control.fires, id: m.id, height: max(8, height - 8)))
             if !flip && showLabel { chip }
         }
         .fixedSize()
-        .modifier(FirePulse(fired: control.firedAt[m.id]))
+        .modifier(FirePulse(fires: control.fires, id: m.id))
         .contentShape(Rectangle())
         .onTapGesture {
             model.selectedLaneID = lane.id
@@ -1073,12 +1097,7 @@ struct TimelinePanel: View {
             .truncationMode(.tail)
             .opacity(model.selectedMarkerIDs.isEmpty || model.recordingFromDesk ? 1 : 0)
             Spacer(minLength: 8)
-            Toggle(isOn: $control.settings.keysFire) {
-                Text("Keys fire the console").font(.manrope(11.5, .medium)).foregroundStyle(Brand.steel)
-            }
-            .toggleStyle(.checkbox)
-            .fixedSize()
-            .help("When on, a lane's key also fires its executor as it drops the trigger, so you see the look while you program.")
+            KeysFireToggle()
         }
         .frame(height: 26)
     }
@@ -1165,9 +1184,13 @@ struct WaveformView: View, Equatable {
 /// Animated on its own, so it shows whether or not the song is rolling. Reduce Motion: a glow only.
 struct FirePulse: ViewModifier {
     enum Style { case bump, glow }
-    let fired: Date?
+    @ObservedObject var fires: FireMonitor
+    let id: UUID
+    /// A lane's glow, rather than a trigger's.
+    var lane = false
     var color: Color = Brand.gold
     var style: Style = .bump
+    private var fired: Date? { lane ? fires.laneFiredAt[id] : fires.firedAt[id] }
     /// 1 when settled; 0 at the moment of firing.
     @State private var settle: CGFloat = 1
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1199,8 +1222,10 @@ struct FirePulse: ViewModifier {
 
 /// A soft gold bloom behind a trigger's line as it fires.
 struct FireBloom: View {
-    let fired: Date?
+    @ObservedObject var fires: FireMonitor
+    let id: UUID
     let height: CGFloat
+    private var fired: Date? { fires.firedAt[id] }
     @State private var settle: CGFloat = 1
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1458,5 +1483,19 @@ struct BeatGridPanel: View {
             .buttonStyle(QuietButtonStyle())
             .font(.manrope(12, .semibold))
             .help(help)
+    }
+}
+
+/// "Keys fire the console", on its own so the timeline doesn't watch connections.
+struct KeysFireToggle: View {
+    @EnvironmentObject private var control: ControlCenter
+
+    var body: some View {
+        Toggle(isOn: $control.settings.keysFire) {
+            Text("Keys fire the console").font(.manrope(11.5, .medium)).foregroundStyle(Brand.steel)
+        }
+        .toggleStyle(.checkbox)
+        .fixedSize()
+        .help("When on, a lane's key also fires its executor as it drops the trigger, so you see the look while you program.")
     }
 }

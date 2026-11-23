@@ -811,3 +811,18 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
 - Core: `MA3TimecodeExport`, `DeskSequenceEvent.sequenceName`. 185 tests pass.
 - **Needs a check on the desk:** the file imports (no Guids or internal object refs are written;
   the desk should resolve tracks by their sequence), and a Goto's CueDestination as a cue number.
+
+## 2026-11-23: smooth timeline and meters
+
+- The timeline no longer watches the connections. Incoming timecode set the follow status 30 times
+  a second (even when it said the same thing), and every lane redrew each time: now the status only
+  changes when its words do, and the timeline reads the consoles without watching them.
+- Hand-fired flashes (Fire now, keys, recording) live in their own `FireMonitor`: a flash redraws
+  the trigger and lane that flash, not the whole timeline. "Keys fire the console" is its own
+  little view.
+- The per-frame pulses look up only the triggers in the last 0.4 s (halving a sorted list worked
+  out once per redraw), instead of walking every trigger in the song 60 times a second.
+- Meters: 30 refreshes a second instead of 60, levels and held peaks in one update instead of two,
+  and nothing at all once they're at rest.
+- App only; 185 core tests pass. **Needs a look on the Mac:** a busy song with many lanes playing,
+  and recording from the desk.

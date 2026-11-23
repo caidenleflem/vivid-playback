@@ -6,8 +6,14 @@ import PlaybackCore
 /// uneven blocks) the meters hold still instead of dipping.
 @MainActor
 final class MeterModel: ObservableObject {
-    @Published private(set) var levels = [Float](repeating: 0, count: 64)
-    @Published private(set) var holds = [Float](repeating: 0, count: 64)
+    /// Levels and held peaks together, so each refresh is one update, not two.
+    struct Snapshot: Equatable {
+        var levels = [Float](repeating: 0, count: 64)
+        var holds = [Float](repeating: 0, count: 64)
+    }
+    @Published private(set) var snapshot = Snapshot()
+    var levels: [Float] { snapshot.levels }
+    var holds: [Float] { snapshot.holds }
     private var meters = [MeterBallistics](repeating: MeterBallistics(), count: 64)
     private var lastBlocks = 0
     private var timer: Timer?
@@ -15,7 +21,8 @@ final class MeterModel: ObservableObject {
 
     init(state: RenderState) {
         self.state = state
-        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+        // 30 a second is as smooth as a meter needs to look, and half the redraws of 60.
+        let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.read() }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -27,7 +34,9 @@ final class MeterModel: ObservableObject {
         let blocks = state.blocks
         let fresh = blocks != lastBlocks
         lastBlocks = blocks
-        var l = levels, h = holds
+        // Nothing playing and the meters already at rest: nothing to redraw.
+        if !fresh && snapshot.levels.allSatisfy({ $0 == 0 }) && snapshot.holds.allSatisfy({ $0 == 0 }) { return }
+        var next = snapshot
         for c in 0..<64 {
             var raw: Float = 0
             if fresh {
@@ -35,11 +44,10 @@ final class MeterModel: ObservableObject {
                 state.peaks[c] = 0
             }
             meters[c].update(peak: raw, fresh: fresh, now: now)
-            l[c] = meters[c].level
-            h[c] = meters[c].hold
+            next.levels[c] = meters[c].level
+            next.holds[c] = meters[c].hold
         }
-        if l != levels { levels = l }
-        if h != holds { holds = h }
+        if next != snapshot { snapshot = next }
     }
 
     /// 0…1 on a -60…0 dB scale.
