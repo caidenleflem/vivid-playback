@@ -110,6 +110,16 @@ struct PlaybackCommands: Commands {
                 .disabled(model.currentSong?.triggerLanes?.isEmpty ?? true)
             Button("Export Setlist as grandMA3 Timecode…") { model.exportAllMA3Timecode() }
                 .disabled(model.show == nil)
+            Menu("Hit Sheet") {
+                Button("Print Song Hit Sheet…") { model.printHitSheet(setlist: false) }
+                    .disabled(model.currentSong == nil)
+                Button("Print Setlist Hit Sheet…") { model.printHitSheet(setlist: true) }
+                Divider()
+                Button("Export Song Hit Sheet as CSV…") { model.exportHitSheetCSV(setlist: false) }
+                    .disabled(model.currentSong == nil)
+                Button("Export Setlist Hit Sheet as CSV…") { model.exportHitSheetCSV(setlist: true) }
+            }
+            .disabled(model.show == nil)
             Button("Save grandMA3 Plugins…") { model.saveDeskPlugin() }
             Button("Import Labels to Console…") { model.labelsShown = true }
                 .disabled(model.show == nil)

@@ -826,3 +826,14 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   and nothing at all once they're at rest.
 - App only; 185 core tests pass. **Needs a look on the Mac:** a busy song with many lanes playing,
   and recording from the desk.
+
+## 2026-11-23: hit sheets
+
+- **Playback › Hit Sheet**: print the selected song's or the whole setlist's hit sheet (the print
+  window also does Save as PDF), or export it as a CSV for a spreadsheet. Every trigger and marker
+  in time order: timecode, song time, bar.beat once the song has a beat grid, the lane, where it
+  fires (3.201 / Seq name), what it does (Go+, Goto cue 5, Fader 80%, Flash Off) and its name. The
+  CSV adds the command line the desk gets. Markers print bold as section headings; triggers on a
+  muted lane print grey and say so. Printed landscape, black on white.
+- Core: `HitSheet` (rows, CSV with quoting and formula-safe text, a printable page). 190 tests pass.
+- **Needs a look on the Mac:** the print preview's table layout.

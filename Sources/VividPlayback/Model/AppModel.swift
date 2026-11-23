@@ -1258,6 +1258,68 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([folder])
     }
 
+    // MARK: Hit sheets
+
+    /// The songs a hit sheet covers: the selected song, or the whole setlist in play order.
+    private func hitSheetSongs(setlist: Bool) -> [Song] {
+        setlist ? queue : (currentSong.map { [$0] } ?? [])
+    }
+
+    /// Opens the print window for a hit sheet (Save as PDF is in there too).
+    func printHitSheet(setlist: Bool) {
+        let songs = hitSheetSongs(setlist: setlist)
+        guard !songs.isEmpty else { post("Nothing to print yet."); return }
+        let html = HitSheet.html(songs, showName: show?.name ?? "Show")
+        guard let data = html.data(using: .utf8),
+              let text = NSAttributedString(html: data, options: [.characterEncoding: String.Encoding.utf8.rawValue],
+                                            documentAttributes: nil) else {
+            post("Couldn't lay out the hit sheet.")
+            return
+        }
+        let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+        info.orientation = .landscape
+        info.topMargin = 28; info.bottomMargin = 28; info.leftMargin = 28; info.rightMargin = 28
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isVerticallyCentered = false
+        let width = info.paperSize.width - info.leftMargin - info.rightMargin
+        let view = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: 100))
+        view.textStorage?.setAttributedString(text)
+        view.isEditable = false
+        view.drawsBackground = true
+        view.backgroundColor = .white
+        view.appearance = NSAppearance(named: .aqua)   // paper is white, even in a dark app
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.textContainer?.widthTracksTextView = true
+        if let lm = view.layoutManager, let tc = view.textContainer { lm.ensureLayout(for: tc) }
+        view.sizeToFit()
+        let op = NSPrintOperation(view: view, printInfo: info)
+        op.jobTitle = (songs.count == 1 ? songs[0].title : (show?.name ?? "Show")) + " hit sheet"
+        op.showsPrintPanel = true
+        op.showsProgressPanel = true
+        op.run()
+    }
+
+    /// Saves a hit sheet as a spreadsheet (CSV).
+    func exportHitSheetCSV(setlist: Bool) {
+        let songs = hitSheetSongs(setlist: setlist)
+        guard !songs.isEmpty else { post("Nothing to export yet."); return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        let base = songs.count == 1 ? songs[0].title : (show?.name ?? "Show")
+        panel.nameFieldStringValue = Self.fileName(base) + " hit sheet.csv"
+        panel.message = "Save the hit sheet for \(songs.count == 1 ? songs[0].title : "the setlist") as a spreadsheet."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try HitSheet.csv(songs).write(to: url, atomically: true, encoding: .utf8)
+            let n = songs.reduce(0) { $0 + $1.markers.count }
+            post("Saved \(url.lastPathComponent): \(n) line\(n == 1 ? "" : "s").")
+        } catch {
+            post("Couldn't save \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
     private static func fileName(_ title: String) -> String {
         let bad = CharacterSet(charactersIn: "/\\:?*\"<>|")
         let clean = title.components(separatedBy: bad).joined(separator: " ").trimmingCharacters(in: .whitespaces)
