@@ -793,3 +793,21 @@ uses. Until now macOS chose for every packet: with Wi-Fi and a wired show networ
   editing. Vivid's start/stop and `"send"` skip the window; a desk that can't show one toggles as
   before. Checked on a mock desk.
 - **Needs a check on the desk:** the window shows, its OSC line box comes back with the number.
+
+## 2026-11-23: export to the desk as a timecode show
+
+- **Playback › Export Song as grandMA3 Timecode…** (one XML) and **Export Setlist as grandMA3
+  Timecode…** (a folder, one file per song with lanes). Written in the shape of the desk's own
+  2.3.2.0 export: the show named after the song, starting at its start timecode, one track per
+  lane that fires a sequence, one CmdEvent (with a RealtimeCmd ExecToken) per trigger: every
+  one-word function, Goto with its cue, and "Flash/Temp/Swap Off" as the key let go. Reported, not
+  exported: lanes that fire an executor (a timecode show's tracks fire sequences; Edit Lane › Fire
+  a sequence instead), custom commands, fader levels, triggers before the song's start.
+- The real DIVA export round-trips: imported, exported and read back, all 247 events with the same
+  words, every time within 1 ms. (The desk lists some tracks' events out of time order; the export
+  sorts them.)
+- The recorder plugin now also sends the sequence's name; lanes made by recording fire that
+  sequence (still matched by their executor), so they export.
+- Core: `MA3TimecodeExport`, `DeskSequenceEvent.sequenceName`. 185 tests pass.
+- **Needs a check on the desk:** the file imports (no Guids or internal object refs are written;
+  the desk should resolve tracks by their sequence), and a Goto's CueDestination as a cue number.

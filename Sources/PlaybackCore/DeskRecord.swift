@@ -125,6 +125,8 @@ public struct DeskSequenceEvent: Equatable, Sendable {
     /// When the plugin saw the change, on the desk's own clock (seconds). Nil from an older
     /// plugin, or a desk whose clock it can't read.
     public var deskTime: Double?
+    /// The sequence on the executor, by name (newer plugins send it).
+    public var sequenceName: String?
 
     /// The plugin looks every 10 ms, so a change happened, on average, half that before its stamp.
     public static let detectionLag = 0.005
@@ -150,10 +152,12 @@ public struct DeskSequenceEvent: Equatable, Sendable {
         func index(_ s: String) -> Int? { Int(s).flatMap { $0 >= 0 ? $0 : nil } }
         let name = a.count > 6 ? a[6] : ""
         let stamp = a.count > 7 ? Double(a[7]).flatMap { $0 >= 0 ? $0 : nil } : nil
-        return DeskSequenceEvent(page: page, executor: ref.executor, isOn: on(a[1]),
-                                 cue: Double(a[2].replacingOccurrences(of: ",", with: ".")),
-                                 index: index(a[3]), previousIndex: index(a[4]), wasOn: on(a[5]),
-                                 name: name.isEmpty || name == "-" ? nil : name, deskTime: stamp)
+        var event = DeskSequenceEvent(page: page, executor: ref.executor, isOn: on(a[1]),
+                                      cue: Double(a[2].replacingOccurrences(of: ",", with: ".")),
+                                      index: index(a[3]), previousIndex: index(a[4]), wasOn: on(a[5]),
+                                      name: name.isEmpty || name == "-" ? nil : name, deskTime: stamp)
+        if a.count > 8, !a[8].isEmpty, a[8] != "-" { event.sequenceName = a[8] }
+        return event
     }
 
     /// What to record, so playing it back puts the sequence where the desk put it: the next cue

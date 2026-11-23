@@ -106,6 +106,10 @@ struct PlaybackCommands: Commands {
                 .disabled(model.show == nil || (model.locked && !model.recordingFromDesk))
             Button("Import grandMA3 Timecode…") { model.importMA3Timecode() }
                 .disabled(model.locked || model.show == nil)
+            Button("Export Song as grandMA3 Timecode…") { model.exportMA3Timecode() }
+                .disabled(model.currentSong?.triggerLanes?.isEmpty ?? true)
+            Button("Export Setlist as grandMA3 Timecode…") { model.exportAllMA3Timecode() }
+                .disabled(model.show == nil)
             Button("Save grandMA3 Plugins…") { model.saveDeskPlugin() }
             Button("Import Labels to Console…") { model.labelsShown = true }
                 .disabled(model.show == nil)

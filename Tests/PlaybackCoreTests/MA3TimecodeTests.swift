@@ -192,3 +192,66 @@ final class MA3TimecodeTests: XCTestCase {
         XCTAssertEqual(TriggerLane(page: 0, executor: 0, sequence: "82").title, "Sequence 82 · Go+")
     }
 }
+
+final class MA3ExportTests: XCTestCase {
+    func song() -> Song {
+        var s = Song(title: "Diva & Co", start: Timecode("01:50:00:00", rate: .fps30)!, fileOffset: 2)
+        s.length = 223.33
+        let a = TriggerLane(name: "DIVA DROP KICK", page: 0, executor: 0, sequence: "DIVA DROP KICK")
+        let b = TriggerLane(page: 0, executor: 0, action: .off, sequence: "82")
+        let exec = TriggerLane(name: "Wash", page: 3, executor: 201)
+        s.triggerLanes = [a, b, exec]
+        func at(_ sec: Double) -> Timecode { s.start.adding(frames: Int((sec * 30).rounded())) }
+        s.markers = [
+            Marker(time: at(4.8), label: "INTRO", laneID: a.id),
+            Marker(time: at(62.733), label: "BEAT DROP", laneID: a.id, action: .toggle),
+            Marker(time: at(70), label: "Cue 5", laneID: a.id, value: 5, action: .gotoCue),
+            Marker(time: at(71), label: "x", laneID: a.id, action: .command, command: "Flash Off"),
+            Marker(time: at(72), label: "y", laneID: a.id, value: 3, action: .custom, command: "Goto Cue {value} {target} Fade 2"),
+            Marker(time: at(-1), label: "pre", laneID: a.id),
+            Marker(time: at(80), label: "Off", laneID: b.id),
+            Marker(time: at(90), label: "z", laneID: exec.id),
+        ]
+        return s
+    }
+
+    func testTimesAreWrittenLikeTheDesk() {
+        XCTAssertEqual(MA3TimecodeExport.time(4.8), "4.800")
+        XCTAssertEqual(MA3TimecodeExport.time(62.733), "1m02.733")
+        XCTAssertEqual(MA3TimecodeExport.time(6600), "1h50m00.000")
+        XCTAssertEqual(MA3Timecode.seconds(MA3TimecodeExport.time(6662.733)) ?? 0, 6662.733, accuracy: 1e-9)
+    }
+
+    func testExportsWhatATimecodeShowCanHoldAndSaysWhatItLeftOut() {
+        let (xml, r) = MA3TimecodeExport.xml(for: song())
+        XCTAssertEqual(r.tracks, 2)
+        XCTAssertEqual(r.events, 5)
+        XCTAssertEqual(r.lanesWithoutSequence, ["Wash"])
+        XCTAssertEqual(r.skipped, ["custom command": 1, "before the song's start": 1])
+        XCTAssertTrue(xml.contains("Name=\"Diva &amp; Co\""))
+        XCTAssertTrue(xml.contains("OffsetTCSlot=\"1h50m00.000\""))
+        XCTAssertTrue(xml.contains("Target=\"ShowData.DataPools.Default.Sequences.82\""))
+    }
+
+    func testReadsBackTheSame() throws {
+        let original = song()
+        let (xml, _) = MA3TimecodeExport.xml(for: original)
+        let shows = MA3Timecode.parse(Data(xml.utf8))
+        let tc = try XCTUnwrap(shows.first)
+        XCTAssertEqual(tc.name, "Diva & Co")
+        XCTAssertEqual(tc.offset, original.start.seconds, accuracy: 1e-3)
+        let kick = try XCTUnwrap(tc.tracks.first { $0.sequence == "DIVA DROP KICK" })
+        XCTAssertEqual(kick.events.map(\.token), ["Go+", "Toggle", "Goto", "Flash"])
+        XCTAssertEqual(kick.events.map(\.action), [.goPlus, .toggle, .gotoCue, .command])
+        XCTAssertEqual(kick.events[3].word, "Flash Off", "the release comes back as a release")
+        XCTAssertEqual(kick.events[1].time, 62.733, accuracy: 0.0011)
+        // Importing it onto a fresh copy of the song gives the same triggers at the same frames.
+        var fresh = original
+        fresh.markers = []
+        fresh.triggerLanes = nil
+        let r = MA3TimecodeImport.apply(tc, to: &fresh)
+        XCTAssertEqual(r.triggers, 5)
+        let before = Set(original.markers.filter { $0.label != "y" && $0.label != "pre" && $0.label != "z" }.map { $0.time.frameCount })
+        XCTAssertEqual(Set(fresh.markers.map { $0.time.frameCount }), before)
+    }
+}

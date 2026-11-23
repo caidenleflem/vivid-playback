@@ -248,3 +248,125 @@ public enum MA3TimecodeImport {
         return r
     }
 }
+
+/// Writing a song's lanes as a grandMA3 timecode show (the XML the desk imports), in the shape
+/// the desk exports: one track per lane that fires a sequence, one event per trigger, the show
+/// starting at the song's start timecode.
+public enum MA3TimecodeExport {
+    public struct Report: Equatable, Sendable {
+        public var tracks = 0
+        public var events = 0
+        /// Lanes left out because they fire an executor, not a sequence (a timecode show's
+        /// tracks fire sequences): their names.
+        public var lanesWithoutSequence: [String] = []
+        /// Triggers left out, by why ("custom command", "fader level", "before the song's start").
+        public var skipped: [String: Int] = [:]
+    }
+
+    /// The XML for `song`. `tcSlot` is the desk's timecode input the show follows.
+    public static func xml(for song: Song, tcSlot: Int = 1) -> (xml: String, report: Report) {
+        var r = Report()
+        let fps = song.rate.framesPerSecond
+        var tracks = ""
+        for lane in song.triggerLanes ?? [] {
+            guard let seq = lane.sequence?.trimmingCharacters(in: .whitespaces), !seq.isEmpty else {
+                if song.markers.contains(where: { $0.laneID == lane.id }) { r.lanesWithoutSequence.append(lane.title) }
+                continue
+            }
+            let markers = song.markers.filter { $0.laneID == lane.id }
+                .sorted { $0.time.frames(since: song.start) < $1.time.frames(since: song.start) }
+            var events = ""
+            for m in markers {
+                let t = Double(m.time.frames(since: song.start)) / fps
+                guard t >= 0 else { r.skipped["before the song's start", default: 0] += 1; continue }
+                guard let e = event(for: m, lane: lane) else {
+                    let why: String
+                    switch m.action ?? lane.action {
+                    case .fader: why = "fader level"
+                    case .custom: why = "custom command"
+                    case .gotoCue: why = "Goto without a cue"
+                    default: why = "no command"
+                    }
+                    r.skipped[why, default: 0] += 1
+                    continue
+                }
+                var attrs = "Name=\"\(escape(e.token))\" Time=\"\(time(t))\""
+                if let cue = e.cue { attrs += " CueDestination=\"\(escape(cue))\"" }
+                events += """
+                                        <CmdEvent \(attrs)>
+                                            <RealtimeCmd Type="Key" Source="Original" Status="\(e.released ? "Off" : "On")" IsRealtime="0" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" FromLocalHardwareFader="0" IgnoreExecXFade="0" IsExecXFade="0" ExecToken="\(escape(e.token))"/>
+                                        </CmdEvent>
+
+                """
+                r.events += 1
+            }
+            guard !events.isEmpty else { continue }
+            let name = lane.name.trimmingCharacters(in: .whitespaces).isEmpty ? seq : lane.name
+            tracks += """
+                        <Track Name="\(escape(name))" Target="ShowData.DataPools.Default.Sequences.\(escape(seq))" Play="" Rec="">
+                            <TimeRange Duration="To End" Play="" Rec="">
+                                <CmdSubTrack>
+
+            """ + events + """
+                                </CmdSubTrack>
+                            </TimeRange>
+                        </Track>
+
+            """
+            r.tracks += 1
+        }
+        let duration = max(1, song.playLength ?? 0)
+        let xml = "\u{FEFF}" + """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <GMA3 DataVersion="2.3.2.0">
+            <Timecode Name="\(escape(song.title))" Duration="\(time(duration))" OffsetTCSlot="\(time(song.start.seconds))" LoopCount="0" TCSlot="\(max(1, tcSlot))" AutoStop="No" SwitchOff="Keep Playbacks" Goto="as Go" AssertPrevEvents="No" RecordRemoteEvents="No" TimeDisplayFormat="Default" FrameReadout="Default">
+                <TrackGroup Play="" Rec="">
+                    <MarkerTrack Name="Marker"/>
+
+        """ + tracks + """
+                </TrackGroup>
+            </Timecode>
+        </GMA3>
+
+        """
+        return (xml, r)
+    }
+
+    /// What a trigger is as a desk event: its word, the cue for a Goto, and whether it's a key let go.
+    static func event(for m: Marker, lane: TriggerLane) -> (token: String, cue: String?, released: Bool)? {
+        let action = m.action ?? lane.action
+        switch action {
+        case .fader, .custom: return nil
+        case .gotoCue:
+            guard let cue = m.value else { return nil }
+            return ("Goto", TriggerLane.cueText(cue), false)
+        case .command:
+            let word = ((m.action != nil ? m.command : nil) ?? lane.command ?? "").trimmingCharacters(in: .whitespaces)
+            guard !word.isEmpty else { return nil }
+            // "Flash Off": the Flash key let go.
+            let parts = word.split(separator: " ")
+            if parts.count == 2, parts[1].lowercased() == "off", ["flash", "temp", "swap"].contains(parts[0].lowercased()) {
+                return (String(parts[0]), nil, true)
+            }
+            return (word, nil, false)
+        default:
+            guard let k = action.keyword else { return nil }
+            return (k, nil, false)
+        }
+    }
+
+    /// Seconds the way the desk writes them: "4.800", "1m02.733", "1h50m00.000".
+    public static func time(_ seconds: Double) -> String {
+        let ms = Int((max(0, seconds) * 1000).rounded())
+        let h = ms / 3_600_000, m = (ms / 60_000) % 60, s = Double(ms % 60_000) / 1000
+        if h > 0 { return String(format: "%dh%02dm%06.3f", h, m, s) }
+        if m > 0 { return String(format: "%dm%06.3f", m, s) }
+        return String(format: "%.3f", s)
+    }
+
+    static func escape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+}

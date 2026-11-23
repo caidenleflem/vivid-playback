@@ -551,6 +551,9 @@ struct LaneEditor: View {
                         numberBox("Exec", value: $lane.executor)
                         Text("Page \(lane.page), executor \(lane.executor)").font(.manrope(12)).foregroundStyle(Brand.graphite)
                             .padding(.leading, 6)
+                        Button("Fire a sequence instead") { lane.sequence = lane.name.trimmingCharacters(in: .whitespaces) }
+                            .buttonStyle(QuietButtonStyle())
+                            .help("Fire the sequence by name (as a timecode show does), so this lane can be exported to the desk as a timecode show.")
                     }
                 }
             }

@@ -68,7 +68,7 @@ final class DeskSequenceTests: XCTestCase {
         let files = DeskPlugin.files(oscLine: 2)
         XCTAssertEqual(files.map(\.name), ["VividRecorder.xml", "VividRecorder.lua"])
         XCTAssertTrue(files[1].contents.contains("local OSC_LINE = 2"))
-        XCTAssertTrue(files[1].contents.contains("/vivid/seq,ssssssss,"), "eight arguments: the stamp is last")
+        XCTAssertTrue(files[1].contents.contains("/vivid/seq,sssssssss,"), "nine arguments: the stamp, then the sequence's name")
         XCTAssertTrue(files[1].contents.contains("CmdIndirect"), "sends through the command queue, not the live command line")
         XCTAssertTrue(files[0].contents.contains(#"FileName="VividRecorder.lua""#))
     }
@@ -146,6 +146,8 @@ final class DeskClockTests: XCTestCase {
         XCTAssertEqual(e.deskTime, 1234.5678)
         let old = try XCTUnwrap(DeskSequenceEvent.from(OSCMessage("/vivid/seq", ["3.201", "on", "2", "1", "0", "on", "Look"].map { .string($0) })))
         XCTAssertNil(old.deskTime, "an older plugin still works")
+        let named = try XCTUnwrap(DeskSequenceEvent.from(OSCMessage("/vivid/seq", ["3.201", "on", "2", "1", "0", "on", "Look", "12.5", "Verse wash"].map { .string($0) })))
+        XCTAssertEqual(named.sequenceName, "Verse wash")
     }
 }
 

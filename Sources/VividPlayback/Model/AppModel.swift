@@ -1106,8 +1106,10 @@ final class AppModel: ObservableObject {
             for (e, seconds) in items {
                 let found = lanes.firstIndex { $0.page == e.page && $0.executor == e.executor }
                 if found == nil {
-                    lanes.append(TriggerLane(page: e.page, executor: e.executor, color: lanes.count % 6,
-                                             key: TriggerLane.freeKey(in: lanes)))
+                    // A new lane fires the sequence by name when the plugin says which (so it can
+                    // go back to the desk as a timecode show); it still answers to its executor.
+                    lanes.append(TriggerLane(name: e.sequenceName ?? "", page: e.page, executor: e.executor, color: lanes.count % 6,
+                                             key: TriggerLane.freeKey(in: lanes), sequence: e.sequenceName))
                 }
                 let lane = lanes[found ?? lanes.count - 1]
                 let tc = timecode(for: song, at: max(0, seconds))
@@ -1211,6 +1213,69 @@ final class AppModel: ObservableObject {
     /// The triggers a menu acts on: the whole selection when the clicked one is in it.
     func triggerTargets(_ m: Marker) -> Set<UUID> {
         selectedMarkerIDs.count > 1 && selectedMarkerIDs.contains(m.id) ? selectedMarkerIDs : [m.id]
+    }
+
+    /// Writes the current song's lanes as a grandMA3 timecode show (XML) to import on the desk.
+    func exportMA3Timecode() {
+        guard let song = currentSong else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.xml]
+        panel.nameFieldStringValue = Self.fileName(song.title) + ".xml"
+        panel.message = "Save \(song.title) as a grandMA3 timecode show, to import on the desk."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let (xml, r) = MA3TimecodeExport.xml(for: song)
+        do {
+            try xml.write(to: url, atomically: true, encoding: .utf8)
+            post(Self.describe(r, title: song.title, file: url.lastPathComponent))
+        } catch {
+            post("Couldn't save \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    /// Writes every song in the setlist that has lanes as its own timecode show, into a folder.
+    func exportAllMA3Timecode() {
+        let songs = queue.filter { !($0.triggerLanes ?? []).isEmpty }
+        guard !songs.isEmpty else { post("No song in this setlist has lanes to export."); return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Save Here"
+        panel.message = "Choose a folder for \(songs.count) timecode show\(songs.count == 1 ? "" : "s"), one file per song."
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        var lines: [String] = []
+        for song in songs {
+            let (xml, r) = MA3TimecodeExport.xml(for: song)
+            let url = folder.appendingPathComponent(Self.fileName(song.title) + ".xml")
+            do {
+                try xml.write(to: url, atomically: true, encoding: .utf8)
+                lines.append(Self.describe(r, title: song.title, file: nil))
+            } catch {
+                lines.append("\(song.title): couldn't save (\(error.localizedDescription)).")
+            }
+        }
+        post("Saved to \(folder.lastPathComponent): " + lines.joined(separator: " "))
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+    }
+
+    private static func fileName(_ title: String) -> String {
+        let bad = CharacterSet(charactersIn: "/\\:?*\"<>|")
+        let clean = title.components(separatedBy: bad).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        return clean.isEmpty ? "Timecode" : clean
+    }
+
+    private static func describe(_ r: MA3TimecodeExport.Report, title: String, file: String?) -> String {
+        var line = "\(title): \(r.events) event\(r.events == 1 ? "" : "s") on \(r.tracks) track\(r.tracks == 1 ? "" : "s")"
+        if let file { line += " in \(file)" }
+        line += "."
+        if !r.lanesWithoutSequence.isEmpty {
+            line += " Left out (they fire an executor, and a timecode show needs a sequence: Edit Lane › Fire a sequence instead): "
+                + r.lanesWithoutSequence.prefix(4).joined(separator: ", ") + (r.lanesWithoutSequence.count > 4 ? "…" : "") + "."
+        }
+        if !r.skipped.isEmpty {
+            line += " Not exported: " + r.skipped.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }.joined(separator: ", ") + "."
+        }
+        return line
     }
 
     /// Imports grandMA3 timecode shows (their exported XML) as lanes and triggers: each show onto

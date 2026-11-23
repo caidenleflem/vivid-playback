@@ -326,10 +326,10 @@ public enum DeskPlugin {
       return -1
     end
 
-    local function message(key, now, before, stamp)
-      return string.format('SendOSC %d "/vivid/seq,ssssssss,%s,%s,%s,%d,%d,%s,%s,%.4f"',
+    local function message(key, now, before, stamp, sequence)
+      return string.format('SendOSC %d "/vivid/seq,sssssssss,%s,%s,%s,%d,%d,%s,%s,%.4f,%s"',
         oscLine(), key, now.on and "on" or "off", cueText(now.number), now.index,
-        before.index, before.on and "on" or "off", clean(now.name), stamp)
+        before.index, before.on and "on" or "off", clean(now.name), stamp, clean(sequence))
     end
 
     -- Lists the desk's timecode shows (their tracks and first events) so Vivid can learn how they
@@ -433,7 +433,7 @@ public enum DeskPlugin {
           -- The first look at an executor (or a page) only learns where it is.
           -- Only presses: a cue that ran by itself (Follow, Time…) moves on without being sent.
           if before ~= nil and (before.on ~= now.on or before.number ~= now.number) and not (on and auto) then
-            pending[#pending + 1] = { at = looks, cmd = message(e.key, now, before, stamp) }
+            pending[#pending + 1] = { at = looks, cmd = message(e.key, now, before, stamp, prop(e.seq, "Name")) }
           end
           last[e.key] = now
         end
